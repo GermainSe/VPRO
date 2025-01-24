@@ -1,0 +1,10 @@
+cd vpro-optimized/SYS/axi/scripts/axi_eisv_system_zu19eg_behave
+
+make override_app OVERRIDE_APP=/home/ipa/gseidlitz/repos/projektarbeit/vpro-optimized/TOOLS/VPRO/ISS/apps/tests/DMA_tests/main.hex
+
+make sim
+
+make console
+
+simulation/questa/modelsim.ini
+simulation/questa/compile.do.corrected
