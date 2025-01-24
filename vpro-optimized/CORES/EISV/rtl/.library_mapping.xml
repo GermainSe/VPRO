@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<com.sigasi.hdt.shared.librarymapping.model:LibraryMappings xmlns:com.sigasi.hdt.shared.librarymapping.model="com.sigasi.hdt.vhdl.scoping.librarymapping" Version="2">
+  <Mappings Location="Common Libraries/vectorsystem" Library="core_v2pro"/>
+  <Mappings Location="package/eisV_pkg_dummy.vhd" Library="core_v2pro"/>
+  <Mappings Location="cache" Library="eisv"/>
+  <Mappings Location="core" Library="eisv"/>
+  <Mappings Location="package" Library="eisv"/>
+  <Mappings Location="subsystem" Library="eisv"/>
+  <Mappings Location="top" Library="eisv"/>
+  <Mappings Location="Common Libraries/IEEE" Library="ieee"/>
+  <Mappings Location="Common Libraries/IEEE Synopsys" Library="ieee"/>
+  <Mappings Location="Common Libraries" Library="not mapped"/>
+  <Mappings Location="Common Libraries/unisim/primitive" Library="not mapped"/>
+  <Mappings Location="Common Libraries/unisim/retarget" Library="not mapped"/>
+  <Mappings Location="Common Libraries/unisim/retarget_VCOMP.vhd" Library="not mapped"/>
+  <Mappings Location="Common Libraries/unisim/secureip" Library="not mapped"/>
+  <Mappings Location="Common Libraries/unisim/unisim_retarget_VCOMP.vhd" Library="not mapped"/>
+  <Mappings Location="subsystem/eisV_single_subsystem.vhd" Library="not mapped"/>
+  <Mappings Location="top/eisV_vpro_dma_fsm.single_cycle_memory.vhd" Library="not mapped"/>
+  <Mappings Location="Common Libraries/STD" Library="std"/>
+  <Mappings Location="Common Libraries/unimacro" Library="unimacro"/>
+  <Mappings Location="Common Libraries/unisim" Library="unisim"/>
+  <Mappings Location="Common Libraries/binaryio.vhd" Library="utils"/>
+  <Mappings Location="Common Libraries/text_io" Library="utils"/>
+  <Mappings Location="Common Libraries/textio.vhd" Library="utils"/>
+  <Mappings Location="" Library="work"/>
+  <Mappings Location="Common Libraries/axi_eisv/eisv_single_bram.v" Library="work"/>
+  <Mappings Location="Common Libraries/axi_interface_unit" Library="work"/>
+  <Mappings Location="Common Libraries/axi_sim_block_ram" Library="work"/>
+  <Mappings Location="Common Libraries/debug_fifo" Library="work"/>
+  <Mappings Location="Common Libraries/uart_module" Library="work"/>
+  <Mappings Location="cache/d_cache_multiword.vhd" Library="work"/>
+  <Mappings Location="cache/i_cache.vhd" Library="work"/>
+  <Mappings Location="core/eisV_mult.vhd" Library="work"/>
+</com.sigasi.hdt.shared.librarymapping.model:LibraryMappings>

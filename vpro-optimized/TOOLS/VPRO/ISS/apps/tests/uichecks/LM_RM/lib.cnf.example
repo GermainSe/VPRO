@@ -1,0 +1,7 @@
+# Set the paths into the ENV VARS
+# $ENV{vpro_sim_lib_dir} $ENV{vpro_aux_lib_dir}
+
+# Or rename this file to lib.cnf and change the VARS below.
+
+set(VPRO_SIMULATOR_LIB_dir "/path/.../iss_lib")
+set(VPRO_AUX_LIB_dir "/path/.../common_lib")

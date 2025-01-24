@@ -1,0 +1,518 @@
+# Helper for running cmake in the build folder "build"
+
+#-------------------------------------------------------------------------------
+# Make defaults
+#-------------------------------------------------------------------------------
+.SUFFIXES:
+# .phony: always build these targets (no "is up to date" message)
+.PHONY: help all asm install install_local main.bin
+.DEFAULT_GOAL := help
+
+#-------------------------------------------------------------------------------
+# Hardware definitions
+#-------------------------------------------------------------------------------
+CLUSTERS	?= 2
+UNITS		?= 2
+APP_NAME	?= "CNN_YOLO_LITE"
+
+#-------------------------------------------------------------------------------
+# Application definitions
+#-------------------------------------------------------------------------------
+build ?= build
+build_release ?= build_release
+
+current_dir = $(shell pwd)
+PROJECT_NAME ?= $(current_dir)
+
+# pass configuration as parameters to cmake script
+VPRO_FLAGS_SIM = -DCLUSTERS=${CLUSTERS} -DUNITS=${UNITS} -DPROJECT=${PROJECT_NAME}
+VPRO_FLAGS = -DNUM_CLUSTERS=${CLUSTERS} -DNUM_VU_PER_CLUSTER=${UNITS} -DSTAT_COMMENT=${APP_NAME}
+
+# default main file
+all: clean_hw clean main mm_init_file
+
+
+#-------------------------------------------------------------------------------
+# Simulator Targets
+#-------------------------------------------------------------------------------
+dir:
+	mkdir -p ${build}
+	mkdir -p ${build_release}
+
+cp:
+ifneq ("$(wildcard CMakeListsAdd.txt)","")
+	cp ../ref_cmakeList.txt CMakeLists.txt
+	echo "## Appending verification cmake targets to CMakeLists.txt"
+	sed -i 's/vpro_project_default_name/${APP_NAME}/g' CMakeLists.txt
+	cat CMakeListsAdd.txt >> CMakeLists.txt
+else
+	cp ../ref_cmakeList.txt CMakeLists.txt
+	sed -i 's/vpro_project_default_name/${APP_NAME}/g' CMakeLists.txt
+endif
+
+config: dir cp main.readelf
+	@echo "\n\nMakefile: cnn vpro app (config), CLUSTERS: ${CLUSTERS}, UNITS: ${UNITS}\n\n"
+	cmake -B ${build} ${VPRO_FLAGS_SIM}
+	@$(MAKE) -s  -C ${build} Generate_configuration -j
+	cd ${build} && ./Generate_configuration
+
+sim: dir cp config
+	cmake -B ${build} ${VPRO_FLAGS_SIM}
+	@$(MAKE) -s  -C ${build} sim -j
+	cd ${build} && ./sim
+
+release: dir cp config
+	cmake -B ${build_release} -Wno-dev -DCMAKE_BUILD_TYPE=Release ${VPRO_FLAGS_SIM}
+	$(MAKE) -s  -C ${build_release} sim -j
+	cd ${build_release} && ./sim #--windowless
+
+# slow configuration. only one thread
+# set in defines.h: calc vpro, compare
+scripted: dir config
+	cmake -B ${build_release} -Wno-dev -DCMAKE_BUILD_TYPE=Release ${VPRO_FLAGS_SIM}
+	$(MAKE) -s  -C ${build_release} sim -j 4
+	cd ${build_release} && ./sim --windowless
+
+data/YOLO_config_segments.bin: config
+data/YOLO_config_weights.bin: config
+data/YOLO_config_layers.bin: config
+data/input0.bin: config
+data/input1.bin: config
+data/input2.bin: config
+
+config.hex: main.readelf data/YOLO_config_segments.bin data/YOLO_config_weights.bin data/input0.bin data/input1.bin data/input2.bin data/YOLO_config_layers.bin
+	@echo "Converting data/input0.bin to data/input0.hex"
+	@xxd -g 4 -e data/input0.bin | cut -d " " -f 2-5 > data/input0.hex
+	@echo "Converting data/input1.bin to data/input1.hex"
+	@xxd -g 4 -e data/input1.bin | cut -d " " -f 2-5 > data/input1.hex
+	@echo "Converting data/input2.bin to data/input2.hex"
+	@xxd -g 4 -e data/input2.bin | cut -d " " -f 2-5 > data/input2.hex
+
+	$(eval size0=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L0_Segments$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size1=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L1_Segments$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size2=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L2_Segments$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size3=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L3_Segments$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size4=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L4_Segments$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size5=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L5_Segments$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size6=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L6_Segments$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval start0=0)
+	$(eval start1=$(shell echo $$(($(start0)+$(size0)))))
+	$(eval start2=$(shell echo $$(($(start1)+$(size1)))))
+	$(eval start3=$(shell echo $$(($(start2)+$(size2)))))
+	$(eval start4=$(shell echo $$(($(start3)+$(size3)))))
+	$(eval start5=$(shell echo $$(($(start4)+$(size4)))))
+	$(eval start6=$(shell echo $$(($(start5)+$(size5)))))
+#	dd skip=${start0} count=${size0} if=data/YOLO_config_segments.bin of=data/YOLO_config_segments0.bin bs=1
+#	dd skip=${start1} count=${size1} if=data/YOLO_config_segments.bin of=data/YOLO_config_segments1.bin bs=1
+#	dd skip=${start2} count=${size2} if=data/YOLO_config_segments.bin of=data/YOLO_config_segments2.bin bs=1
+#	dd skip=${start3} count=${size3} if=data/YOLO_config_segments.bin of=data/YOLO_config_segments3.bin bs=1
+#	dd skip=${start4} count=${size4} if=data/YOLO_config_segments.bin of=data/YOLO_config_segments4.bin bs=1
+#	dd skip=${start5} count=${size5} if=data/YOLO_config_segments.bin of=data/YOLO_config_segments5.bin bs=1
+#	dd skip=${start6} count=${size6} if=data/YOLO_config_segments.bin of=data/YOLO_config_segments6.bin bs=1
+	dd skip=${start0} bs=${size0}    if=data/YOLO_config_segments.bin of=data/YOLO_config_segments0.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start1} bs=${size1}    if=data/YOLO_config_segments.bin of=data/YOLO_config_segments1.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start2} bs=${size2}    if=data/YOLO_config_segments.bin of=data/YOLO_config_segments2.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start3} bs=${size3}    if=data/YOLO_config_segments.bin of=data/YOLO_config_segments3.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start4} bs=${size4}    if=data/YOLO_config_segments.bin of=data/YOLO_config_segments4.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start5} bs=${size5}    if=data/YOLO_config_segments.bin of=data/YOLO_config_segments5.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start6} bs=${size6}    if=data/YOLO_config_segments.bin of=data/YOLO_config_segments6.bin count=1 iflag=skip_bytes status=none
+
+	$(eval size0=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv0$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size1=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv1$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size2=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv2$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size3=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv3$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size4=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv4$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size5=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv5$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval size6=$(shell echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv6$$ | awk '{print $$3;}' | sed 's/^0x//g' | tr '[:lower:]' '[:upper:]' `" | bc))
+	$(eval start0=0)
+	$(eval start1=$(shell echo $$(($(start0)+$(size0)))))
+	$(eval start2=$(shell echo $$(($(start1)+$(size1)))))
+	$(eval start3=$(shell echo $$(($(start2)+$(size2)))))
+	$(eval start4=$(shell echo $$(($(start3)+$(size3)))))
+	$(eval start5=$(shell echo $$(($(start4)+$(size4)))))
+	$(eval start6=$(shell echo $$(($(start5)+$(size5)))))
+#	dd skip=${start0} count=${size0} if=data/YOLO_config_weights.bin of=data/YOLO_config_weights0.bin bs=1
+#	dd skip=${start1} count=${size1} if=data/YOLO_config_weights.bin of=data/YOLO_config_weights1.bin bs=1
+#	dd skip=${start2} count=${size2} if=data/YOLO_config_weights.bin of=data/YOLO_config_weights2.bin bs=1
+#	dd skip=${start3} count=${size3} if=data/YOLO_config_weights.bin of=data/YOLO_config_weights3.bin bs=1
+#	dd skip=${start4} count=${size4} if=data/YOLO_config_weights.bin of=data/YOLO_config_weights4.bin bs=1
+#	dd skip=${start5} count=${size5} if=data/YOLO_config_weights.bin of=data/YOLO_config_weights5.bin bs=1
+#	dd skip=${start6} count=${size6} if=data/YOLO_config_weights.bin of=data/YOLO_config_weights6.bin bs=1
+	dd skip=${start0} bs=${size0}    if=data/YOLO_config_weights.bin of=data/YOLO_config_weights0.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start1} bs=${size1}    if=data/YOLO_config_weights.bin of=data/YOLO_config_weights1.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start2} bs=${size2}    if=data/YOLO_config_weights.bin of=data/YOLO_config_weights2.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start3} bs=${size3}    if=data/YOLO_config_weights.bin of=data/YOLO_config_weights3.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start4} bs=${size4}    if=data/YOLO_config_weights.bin of=data/YOLO_config_weights4.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start5} bs=${size5}    if=data/YOLO_config_weights.bin of=data/YOLO_config_weights5.bin count=1 iflag=skip_bytes status=none
+	dd skip=${start6} bs=${size6}    if=data/YOLO_config_weights.bin of=data/YOLO_config_weights6.bin count=1 iflag=skip_bytes status=none
+
+	@echo "Converting data/YOLO_config_segments.bin to data/YOLO_config_segments.hex"
+	@xxd -g 4 -e data/YOLO_config_segments0.bin | cut -d " " -f 2-5 > data/YOLO_config_segments0.hex
+	@xxd -g 4 -e data/YOLO_config_segments1.bin | cut -d " " -f 2-5 > data/YOLO_config_segments1.hex
+	@xxd -g 4 -e data/YOLO_config_segments2.bin | cut -d " " -f 2-5 > data/YOLO_config_segments2.hex
+	@xxd -g 4 -e data/YOLO_config_segments3.bin | cut -d " " -f 2-5 > data/YOLO_config_segments3.hex
+	@xxd -g 4 -e data/YOLO_config_segments4.bin | cut -d " " -f 2-5 > data/YOLO_config_segments4.hex
+	@xxd -g 4 -e data/YOLO_config_segments5.bin | cut -d " " -f 2-5 > data/YOLO_config_segments5.hex
+	@xxd -g 4 -e data/YOLO_config_segments6.bin | cut -d " " -f 2-5 > data/YOLO_config_segments6.hex
+
+	@echo "Converting data/YOLO_config_layers.bin to data/YOLO_config_layers.hex"
+	@xxd -g 4 -e data/YOLO_config_layers.bin | cut -d " " -f 2-5 > data/YOLO_config_layers.hex
+
+	@echo "Converting data/YOLO_config_weights.bin to data/YOLO_config_weights.hex"
+	@xxd -g 4 -e data/YOLO_config_weights0.bin | cut -d " " -f 2-5 > data/YOLO_config_weights0.hex
+	@xxd -g 4 -e data/YOLO_config_weights1.bin | cut -d " " -f 2-5 > data/YOLO_config_weights1.hex
+	@xxd -g 4 -e data/YOLO_config_weights2.bin | cut -d " " -f 2-5 > data/YOLO_config_weights2.hex
+	@xxd -g 4 -e data/YOLO_config_weights3.bin | cut -d " " -f 2-5 > data/YOLO_config_weights3.hex
+	@xxd -g 4 -e data/YOLO_config_weights4.bin | cut -d " " -f 2-5 > data/YOLO_config_weights4.hex
+	@xxd -g 4 -e data/YOLO_config_weights5.bin | cut -d " " -f 2-5 > data/YOLO_config_weights5.hex
+	@xxd -g 4 -e data/YOLO_config_weights6.bin | cut -d " " -f 2-5 > data/YOLO_config_weights6.hex
+
+mm_init_file: config.hex
+	@echo "${PWD}/data/input0.hex" > main.mm_init
+	@echo "285212672" >> main.mm_init	# = 0x11000000
+	@echo "${PWD}/data/input1.hex" >> main.mm_init
+	@echo "285313024" >> main.mm_init	# = 0x11018800
+	@echo "${PWD}/data/input2.hex" >> main.mm_init
+	@echo "285413376" >> main.mm_init	# = 0x11031000
+	@#
+	@echo "${PWD}/data/YOLO_config_segments0.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L0_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_segments1.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L1_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_segments2.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L2_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_segments3.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L3_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_segments4.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L4_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_segments5.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L5_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_segments6.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L6_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@#
+	@echo "${PWD}/data/YOLO_config_layers.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*yolo$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc  | awk '{ print $$0+28; }' >> main.mm_init # error due to index offset... this is an array of pointer to those structures - check fix of adding 28 (base modification of yolo struct)
+	@#
+	@echo "${PWD}/data/YOLO_config_weights0.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv0$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_weights1.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv1$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_weights2.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv2$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_weights3.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv3$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_weights4.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv4$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_weights5.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv5$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+	@echo "${PWD}/data/YOLO_config_weights6.hex" >> main.mm_init
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv6$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init
+
+	@echo "Generated main.mm_init file for (bram) simulation: "
+	@cat main.mm_init | sed 's/^/  /'
+#   -g 4 byte groups (32-bit) for imem word size
+#   -e little endian byte order
+#   cut removes address and ascii tranlsation
+
+
+mm_init_file.bin: config.hex
+	@echo "input0.bin" > main.mm_init.bin
+	@echo "285212672" >> main.mm_init.bin	# = 0x11000000
+	@echo "input1.bin" >> main.mm_init.bin
+	@echo "285313024" >> main.mm_init.bin	# = 0x11018800
+	@echo "input2.bin" >> main.mm_init.bin
+	@echo "285413376" >> main.mm_init.bin	# = 0x11031000
+	@#
+	@echo "YOLO_config_segments0.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L0_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_segments1.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L1_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_segments2.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L2_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_segments3.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L3_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_segments4.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L4_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_segments5.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L5_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_segments6.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*L6_Segments$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@#
+	@echo "YOLO_config_layers.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*yolo$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc  | awk '{ print $$0+28; }' >> main.mm_init.bin # error due to index offset... this is an array of pointer to those structures - check fix of adding 28 (base modification of yolo struct)
+	@#
+	@echo "YOLO_config_weights0.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv0$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_weights1.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv1$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_weights2.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv2$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_weights3.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv3$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_weights4.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv4$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_weights5.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv5$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+	@echo "YOLO_config_weights6.bin" >> main.mm_init.bin
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*conv6$$ | awk '{print $$2;}' | tr '[:lower:]' '[:upper:]' `" | bc >> main.mm_init.bin
+
+	@echo "Generated main.mm_init.bin file for emulation: "
+	@cat main.mm_init.bin | sed 's/^/  /'
+#   -g 4 byte groups (32-bit) for imem word size
+#   -e little endian byte order
+#   cut removes address and ascii tranlsation
+
+
+#-------------------------------------------------------------------------------
+# Tools / Paths
+#-------------------------------------------------------------------------------
+PREFIX=riscv32-unknown-elf
+BIN_PATH=${RISCV}/bin/${PREFIX}-
+
+
+# MIPS common files
+MIPS_COMMON_LIB = ../../common/vpro
+VPRO_CNN_LIB    = ../cnn_converter/vpro_lib_hw
+LINKER_SCRIPT   = $(MIPS_COMMON_LIB)/mips_link_script.lds
+APP_DIR	        = $(shell basename $(CURDIR))
+HOST_DIR	    = ../../host/${APP_DIR}/
+CHECKER_PATH    = $(HOST_DIR)
+ISA_PATH        = ../../../../TOOLS/VPRO/ISS/
+LIB_DIR         = ../../common/riscv/lib_bram_eisv
+
+FLAGS  = -Os -g -static -mabi=ilp32 -march=rv32imc -Wall -pedantic # -msoft-float -mfloat-abi=soft
+#FLAGS += -disable-simplify-libcalls #-relocation-model=static -mno-check-zero-division
+FLAGS += -std=c++20 #-stdlib=libstdc++ -inline-threshold=1000000
+FLAGS += -finline-functions -fdata-sections -ffunction-sections # -fvirtual-function-elimination -flto=full
+FLAGS += -nostartfiles
+FLAGS += -T ${LIB_DIR}/link.ld -L ${LIB_DIR} -lcv-verif
+FLAGS += -L ${RISCV}/${PREFIX}/include/
+FLAGS += ${VPRO_FLAGS}
+FLAGS += -DNDEBUG # should remove assert checks
+#FLAGS += -I$(RISCV)/12.0.0/include
+#FLAGS += -I/usr/include/c++/9/
+#FLAGS += -I/usr/include/c++/8/
+#FLAGS += -I/usr/include/x86_64-linux-gnu/c++/9
+#FLAGS += -I/usr/include/x86_64-linux-gnu/c++/8
+FLAGS += -I$(ISA_PATH) -Iincludes/ -I$(VPRO_CNN_LIB)/includes/
+
+#-------------------------------------------------------------------------------
+# BUILD files / dirs
+#-------------------------------------------------------------------------------
+## HOWTO
+# new header dir: add to CLANG_FLAGS
+# new source dir: add to C_FILES all sources [wildcard]
+#    (maybe create own object dir, as for MIPS_COMMON_LIB)
+
+# directories for different produced files / types
+O_DIR = obj
+ELF_DIR = elf
+ASM_DIR = asm
+
+C_FILES = main.cpp
+C_FILES += $(wildcard sources/*.cpp)
+#C_FILES += $(wildcard sources/weights/*.cpp)
+C_FILES += $(MIPS_COMMON_LIB)/vpro_globals.cpp
+C_FILES += $(VPRO_CNN_LIB)/sources/helper.cpp $(VPRO_CNN_LIB)/sources/segment_scheduling.cpp $(VPRO_CNN_LIB)/sources/vpro_functions_statistical.cpp
+C_FILES += yolo_configuration.cpp
+#C_FILES += mem_functions.cpp
+
+# generate .ll list from C_FILES.
+#     replace $(MIPS_COMMON_LIB) with path MIPS_COMMON_LIB/ (to store object files there)
+O_FILES_T = $(patsubst %.cpp,$(O_DIR)/%.ll,$(C_FILES))
+O_FILES__T = $(subst $(MIPS_COMMON_LIB)/,MIPS_COMMON_LIB/, $(O_FILES_T) )
+O_FILES = $(subst $(VPRO_CNN_LIB)/,VPRO_CNN_LIB/, $(O_FILES__T) )
+
+# generate .elf list from O_FILES.
+ELF_FILES = $(patsubst $(O_DIR)/%.ll,$(ELF_DIR)/%.elf,$(O_FILES))
+ASM_FILES = $(patsubst $(O_DIR)/%.ll,$(ASM_DIR)/%.asm,$(O_FILES))
+
+#-------------------------------------------------------------------------------
+# Helper Functions
+#-------------------------------------------------------------------------------
+### Function to get index of a item in a list
+###  e.g. "main.cpp" in C_FILES
+###  => used to get corresponding item in O_FILES [path replace of MIPS_COMMON_LIB and other parent dir Source Files]
+EMPTY :=
+SPACE := $(EMPTY) $(EMPTY)
+XX := ,
+IDX = $(words $(subst $(XX),$(SPACE),$(firstword $(subst $(XX)$(2)$(XX),$(XX)$(2)$(SPACE),$(XX)$(subst $(SPACE),$(XX),$(1))$(XX)))))
+
+#-------------------------------------------------------------------------------
+# Application VPRO Hardware / Machine Code Targets
+#-------------------------------------------------------------------------------
+# to debug
+.PHONY: test
+test:
+	@echo "#####################################################################"
+	@echo "\e[7mInput Source Files to compile:\e[0m"
+	@$(foreach file,$(C_FILES),echo $(file);)
+	@echo ""
+	@echo "#####################################################################"
+	@echo "\e[Flags:\e[0m"
+	@echo $(FLAGS)
+	@echo ""
+	@echo "#####################################################################"
+	@echo "parse of .readelf..."
+	@echo "obase=10; ibase=16; `cat main.readelf | grep OBJECT.*yolo$$ | awk '{print $$2;}' | tr '[:lower:]' '[:up>
+	@echo "obase=10; ibase=16; `cat main.readelf | grep L1_Segments$$ | awk '{print $$2;}'| sed 's/^0*//g' | tr '[>
+	@echo ""
+	@echo "#####################################################################"
+
+
+#-------------------------------------------------------------------------------
+
+
+.PHONY: $(ELF_DIR)/%.elf rv_lib
+
+rv_lib:
+	make -C ${LIB_DIR}
+
+# create of Machine Code elf file
+$(ELF_DIR)/final.elf: rv_lib $(C_FILES)
+	@LD_LIBRARY_PATH=$(BIN_PATH)
+	@echo Creating $@
+	@mkdir -p $(@D)
+	@${BIN_PATH}g++ ${FLAGS} $(C_FILES) -o $@
+
+#-------------------------------------------------------------------------------
+
+# Generate final executable binary image
+main.bin: $(ELF_DIR)/final.elf
+	@echo ""
+	@echo "Section Sizes:"
+	@$(BIN_PATH)size $<
+	@echo ""
+	@${BIN_PATH}objcopy -O binary -R .vproimage -R .nobss $< $@
+	@objcopy -I binary -O binary --reverse-bytes=4 $@ $@
+	@echo Created $@
+
+main.hex: main.bin
+	@xxd -g 4 $< | cut -d " " -f 2-5 > $@
+#   -g 4 byte groups (32-bit) for imem word size
+#   -e little endian byte order
+#   cut removes address and ascii tranlsation
+
+main: main.readelf main.objdump main.hex
+
+
+main.readelf: $(ELF_DIR)/final.elf
+	@${BIN_PATH}readelf  --sym-base=16  -a $< > $@
+
+main.objdump: $(ELF_DIR)/final.elf
+	${BIN_PATH}objdump -d -M no-aliases -M numeric -S $< > $@
+
+
+#-------------------------------------------------------------------------------
+
+# copy executable to exe folder
+install_local: main.bin
+	@echo Copy $< to ${HOST_DIR}executable.bin
+	@cp $< ${HOST_DIR}executable.bin
+
+install_remote: main.cpp
+	@echo "calling ../remotecompile.sh"
+	@../remotecompile.sh
+	@echo Copy main.bin to ${HOST_DIR}executable.bin
+	@cp main.bin ${HOST_DIR}executable.bin
+
+install: install_local
+	@echo "\n compile of VPRO binary executable done!\n \t CLUSTERS: ${CLUSTERS}, UNITS: ${UNITS}\n"
+	@echo "\n#################################\n Copy Yolo Config Files... \n#################################\n"
+	cp -v data/YOLO_config* ${HOST_DIR}/data/
+	cp -v data/input*.bin ${HOST_DIR}/data/
+	@echo "Compile Local done!"
+#	@echo "Compile Local? [Y/n]"
+#	@read line; if [ $$line = "n" ]; \
+#	then \
+#	echo "Selected remote build" && $(MAKE) -s install_remote; exit 0 ; \
+#	else \
+#	echo "Installing from local build" && $(MAKE) -s install_local; exit 0; \
+#	fi;
+
+#-------------------------------------------------------------------------------
+
+# S interleave with disassmbly
+# w wide mode
+# l line numbers
+# C C++ symbol names
+# r shows symbol names on relocations
+# d disassembly
+asm: final.elf
+	@echo "Disassemle of final.elf [Machine Code including crt0 and all application code]"
+	@$(BIN_PATH)objdump -SlCwrd final.elf
+
+
+#-------------------------------------------------------------------------------
+# Help
+#-------------------------------------------------------------------------------
+# .phony: always build these targets (no "is up to date" message)
+.PHONY: help
+help:
+	@echo "--------------------------------------------------------------"
+	@echo "VPRO \e[7m\e[1m ${APP_DIR} \e[0m\e[27m application compilation script"
+	@echo "--------------------------------------------------------------"
+	@echo "Simulation Targets: [outdated - to be tested again]"
+	@echo " \e[4mcp\e[0m           (ENV)  create up to date CMakelists.txt file from ref_ [parent folder] + CMakelistsAdd.txt"
+	@echo " \e[4mdir\e[0m          (ENV)  creation of build dir for release & debug"
+	@echo " \e[4msim\e[0m          (SIM)  cp + compile [cmake+make] debugable executeable + run"
+	@echo " \e[4mrelease\e[0m      (SIM)  cp + compile [cmake+make] fast executeable + run"
+	@echo " \e[4mscripted\e[0m     (SIM)  compile [cmake+make] for script [low parallel] + run [no window]"
+	@echo "--------------------------------------------------------------"
+	@echo "Hardware Build Targets (Machine Code):"
+	@echo " \e[4mrv_lib\e[0m                              (VPRO) library (crt0 etc.) [inside $(LIB_DIR)/]"
+	@echo " \e[4mmain [.objdump|.bin|.readelf|.hex]\e[0m  (VPRO) Generate binary executable {$(ELF_DIR)/final.elf"
+	@echo " \e[4masm\e[0m                                 (VPRO) Print assembly listing from Machine Code (final.elf)"
+	@echo "--------------------------------------------------------------"
+	@echo "Hardware Debug:"
+	@echo " \e[4mtest\e[0m         (INFO) print input files list and flags"
+	@echo "--------------------------------------------------------------"
+	@echo "Other Targets:"
+	@echo " \e[4mclean\e[0m        Clean up this directory"
+	@echo " \e[4mhelp\e[0m         Show this text"
+	@echo " \e[4mall\e[0m          clean + sim + install"
+	@echo "--------------------------------------------------------------"
+	@echo "Notes:"
+	@echo " Inside SYS/axi/scripts/axi_eisv_system/:"
+	@echo "  make override_app OVERRIDE_APP=~/repositories/APPS/EISV/cnn_yololite/cnn_yolo_lite_hw/main.hex"
+
+#-------------------------------------------------------------------------------
+# Clean-up
+#-------------------------------------------------------------------------------
+# .phony: always build these targets (no "is up to date" message)
+.PHONY: clean clean_sim clean_hw clean_sim_all
+clean: clean_sim_all clean_hw cp
+clean_hw:
+	@echo "\n\tCleaning up Hardware workspace..."
+	rm -f *.ll *.elf *.bin $(dir ${APP_SRC})*.vpp.c $(dir ${APP_SRC})*.cpp.c *.asm *.sed.c
+	rm -f exe/*.bin gen/*.c
+	rm -rf remote_compiled
+	rm -rf $(O_DIR)
+	rm -rf $(ELF_DIR)
+	rm -rf $(ASM_DIR)
+	rm -rf *.hex
+	rm -rf data/*.hex
+	rm -rf *.bin
+	rm -rf data/Y*.bin	# do not delete input*.bin
+	make -C ${LIB_DIR} clean
+
+#	@echo "Cleaning up Simulator workspace..."
+#	@$(MAKE) -s  -C ${build} clean
+
+clean_sim_all:
+	@echo "\n\tCleaning up Simulator workspace..."
+	rm -rf CMakeLists.txt
+	rm -rf ${build}
+	rm -rf ${build_release}*
+	rm -rf init/archive/*.cfg.old
+	rm -rf exit/archive/*.cfg.old
+	rm -rf data/statistic_out.csv
+	rm -rf data/sim_cmd_history.log
+	rm -rf data/out*.bin
+	rm -rf data/out*.bmp
+	rm -rf scripts/log/*.log
+
+clean_sim: clean_sim_all cp
+
+#-------------------------------------------------------------------------------
+# eof

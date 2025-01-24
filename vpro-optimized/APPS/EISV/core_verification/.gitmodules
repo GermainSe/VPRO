@@ -1,0 +1,9 @@
+[submodule "test_frameworks/riscv-compliance"]
+	path = test_frameworks/riscv-compliance
+	url = https://github.com/riscv/riscv-arch-test.git
+	branch = 9141cf9274b610d059199e8aa2e21f54a0bc6a6e
+# 9141cf9274b610d059199e8aa2e21f54a0bc6a6e = tag = 2.4.6
+[submodule "patara"]
+	path = patara
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/zuse-ki-avf/app/patara.git
+	branch = RISC-V

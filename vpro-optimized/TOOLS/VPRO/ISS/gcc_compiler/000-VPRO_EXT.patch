@@ -1,0 +1,48 @@
+diff --git a/include/opcode/riscv-opc.h b/include/opcode/riscv-opc.h
+index 85d35c1efc9..18a6a25e18a 100644
+--- a/include/opcode/riscv-opc.h
++++ b/include/opcode/riscv-opc.h
+@@ -20,6 +20,15 @@
+
+ #ifndef RISCV_ENCODING_H
+ #define RISCV_ENCODING_H
++
++/* VPRO Extension Definitions */
++#define MATCH_VPRO_LW     0x102B    /* custom-1, funct3 = 1 */
++#define MASK_VPRO_LW      0x707f    /* s-type */
++#define MATCH_VPRO_I      0x0B      /* custom-0 */
++#define MASK_VPRO_I       0x7f      /* u-type */
++#define MATCH_VPRO_DMA_LW 0x202B    /* custom-1, funct3 = 2 */
++#define MASK_VPRO_DMA_LW  0x707f    /* r-type */
++
+ /* Instruction opcode macros.  */
+ #define MATCH_SLLI_RV32 0x1013
+ #define MASK_SLLI_RV32  0xfe00707f
+@@ -2783,6 +2792,11 @@
+ #define CSR_VLENB 0xc22
+ #endif /* RISCV_ENCODING_H */
+ #ifdef DECLARE_INSN
++/* Custom VPRO Extension */
++DECLARE_INSN(vpro, MATCH_VPRO_TEST, MASK_VPRO_TEST)
++DECLARE_INSN(vpro_i, MATCH_VPRO_I, MASK_VPRO_I)
++DECLARE_INSN(vpro_lw, MATCH_VPRO_LW, MASK_VPRO_LW)
++/* end VPRO */
+ DECLARE_INSN(slli_rv32, MATCH_SLLI_RV32, MASK_SLLI_RV32)
+ DECLARE_INSN(srli_rv32, MATCH_SRLI_RV32, MASK_SRLI_RV32)
+ DECLARE_INSN(srai_rv32, MATCH_SRAI_RV32, MASK_SRAI_RV32)
+diff --git a/opcodes/riscv-opc.c b/opcodes/riscv-opc.c
+index f67375f10a9..84f5e3083db 100644
+--- a/opcodes/riscv-opc.c
++++ b/opcodes/riscv-opc.c
+@@ -332,6 +332,11 @@ const struct riscv_opcode riscv_opcodes[] =
+ {
+ /* name, xlen, isa, operands, match, mask, match_func, pinfo.  */
+
++/* VPRO Command Extension Special Register*/
++{"vpro.lw",     0, INSN_CLASS_I, "t,s,q", MATCH_VPRO_LW,     MASK_VPRO_LW,     match_opcode, 0},
++{"vpro.li",     0, INSN_CLASS_I, "d,u",   MATCH_VPRO_I,      MASK_VPRO_I,      match_opcode, 0},
++{"vpro.dma.lw", 0, INSN_CLASS_I, "t,s,q", MATCH_VPRO_DMA_LW, MASK_VPRO_DMA_LW, match_opcode, 0},
++
+ /* Standard hints.  */
+ {"prefetch.i",  0, INSN_CLASS_ZICBOP, "Wif(s)", MATCH_PREFETCH_I, MASK_PREFETCH_I, match_opcode, 0 },
+ {"prefetch.r",  0, INSN_CLASS_ZICBOP, "Wif(s)", MATCH_PREFETCH_R, MASK_PREFETCH_R, match_opcode, 0 },

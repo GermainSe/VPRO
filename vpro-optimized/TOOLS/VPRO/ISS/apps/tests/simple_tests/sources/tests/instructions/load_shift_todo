@@ -1,0 +1,75 @@
+
+
+
+    // set rf to certain value
+    rf_set(0, 16, 1024);
+    vpro_wait_busy(0,0);
+    printf("RF set to 1!\n");
+    sim_wait_step(true);
+
+    // store to LM
+    int shift_factor = -2;
+
+    if (shift_factor <= 0)
+        __builtin_vpro_instruction_word(0, NONBLOCKING, IS_CHAIN, FUNC_MULL, NO_FLAG_UPDATE,
+                                        DST_ADDR(0, 1, 16),
+                                        SRC1_ADDR(0, 1, 16),
+                                        SRC2_IMM(int(pow(int(2),shift_factor))),
+                                        15,
+                                        15);
+    else
+        __builtin_vpro_instruction_word(0, NONBLOCKING, IS_CHAIN, FUNC_SHIFT_AR, NO_FLAG_UPDATE,
+                                        DST_ADDR(0, 1, 16),
+                                        SRC1_ADDR(0, 1, 16),
+                                        SRC2_IMM(shift_factor),
+                                        15,
+                                        15);
+
+    __builtin_vpro_instruction_word(LS, NONBLOCKING, NO_CHAIN, FUNC_STORE, NO_FLAG_UPDATE,
+                                    DST_ADDR(0, 1, 16),
+                                    SRC1_CHAINING(0),
+                                    SRC2_IMM(0),
+                                    15,
+                                    15);
+
+    vpro_wait_busy(0,0);
+    printf("LM set to values of RF 0, shifted by %i !\n", shift_factor);
+    sim_wait_step(true);
+
+    rf_set(0, 0, 1024);
+    vpro_wait_busy(0,0);
+    printf("RF 0 reset!\n");
+    sim_wait_step(true);
+
+    // LOAD into RF Lane 1
+    __builtin_vpro_instruction_word(LS, NONBLOCKING, IS_CHAIN, FUNC_LOADS, NO_FLAG_UPDATE,
+                                    DST_ADDR(0, 1, 16),
+                                    SRC1_ADDR(0, 1, 16),
+                                    SRC2_IMM(0),
+                                    15,
+                                    15);
+
+    __builtin_vpro_instruction_word(1, BLOCKING, NO_CHAIN, FUNC_AND, NO_FLAG_UPDATE,
+                                    DST_ADDR(0, 1, 16),
+                                    SRC1_LS,
+                                    SRC2_IMM(0xffffffff),
+                                    15,
+                                    15);
+    vpro_wait_busy(0,0);
+    printf("RF 1 should have data\n");
+    sim_wait_step(true);
+
+    if (shift_factor >= 0)
+        __load_shift_left(LS, 0, 0, 1, 16, shift_factor, 15, 15);
+    if (shift_factor < 0)
+        __load_shift_right(LS, 0, 0, 1, 16, -shift_factor, 15, 15);
+
+    __builtin_vpro_instruction_word(0, NONBLOCKING, NO_CHAIN, FUNC_AND, NO_FLAG_UPDATE,
+                                    DST_ADDR(0, 1, 16),
+                                    SRC1_LS,
+                                    SRC2_IMM(0xffffffff),
+                                    15,
+                                    15);
+    vpro_wait_busy(0,0);
+    printf("RF 0 and RF 1 should differ! 0 has data shifted left by %i!\n", shift_factor);
+    sim_wait_step(true);

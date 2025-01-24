@@ -1,0 +1,114 @@
+EISV       = $(ROOTDIR)/riscv-target/eisv/device/rv32imc
+LDSCRIPT    = $(EISV)/link.ld
+TRAPHANDLER = $(EISV)/handler.S
+DEFINES     = -DPRIV_MISA_S=0 -DPRIV_MISA_U=0 -DTRAPHANDLER="\"$(TRAPHANDLER)\""
+
+REPO_DIR = ../../../../..
+
+TARGET_SIM ?= $(EISV)/runtarget.sh
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+	$(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+RUN_TARGET = $(TARGET_SIM) $(*) $(WORK)
+# $(REDIR1) $(REDIR2) # redirect of output
+
+$(info )
+$(info SIMULATE PARAMETER: $(RUN_TARGET))
+$(info RV-Test Defines: $(RVTEST_DEFINES))
+$(info )
+
+RISCV ?= ""
+
+ifndef RISCV
+$(info )
+$(info $(shell (echo "\033[0;31m"))environmental Variable "RISCV" is not set! $(shell (echo "\033[0;0m")))
+$(info   -> module load riscv-toolchain)
+$(info )
+$(info )
+$(error "RISCV is not set")
+endif
+
+RISCV_PREFIX   ?= ${RISCV}/bin/riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_G++      ?= $(RISCV_PREFIX)g++
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)objcopy
+RISCV_NM       ?= $(RISCV_PREFIX)nm
+RISCV_READELF  ?= $(RISCV_PREFIX)readelf
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles $(RVTEST_DEFINES)
+
+BITWIDTH_REDUCE_TO_16_BIT ?= 0
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(1) $$(RISCV_GCC_OPTS) \
+		-I$(ROOTDIR)/riscv-test-env/ \
+		-I$(ROOTDIR)/riscv-test-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		-I${REPO_DIR}/TOOLS/VPRO/ISS/iss_lib/ \
+		-DBITWIDTH_REDUCE_TO_16_BIT=${BITWIDTH_REDUCE_TO_16_BIT} \
+		$(DEFINES) -T$(LDSCRIPT) $$(<) \
+		-o $$@; \
+    $$(RISCV_OBJDUMP) -d $$@ > $$@.objdump; \
+    $$(RISCV_READELF) -a $$@ > $$@.readelf; \
+    $$(RISCV_NM) $$@ > $$@.nm; \
+    $$(RISCV_OBJCOPY) -O binary $$@ $$@.bin; \
+	$$(RISCV_OBJCOPY) -I binary -O binary --reverse-bytes=4 $$@.bin $$@.corrected.bin; \
+    xxd -g 4 -e $$@.bin | cut -d " " -f 2-5 > $$@.hex
+
+
+#LIB_DIR=$(ROOTDIR)/../../template/lib
+#LIB_DIR=$(ROOTDIR)/../../../../../TOOLS/VPRO/ISS/common_lib/riscv/lib_bram_eisv
+LIB_DIR=$(ROOTDIR)/../../../../../TOOLS/VPRO/ISS/common_lib/riscv/lib_ddr_sys
+
+C_FLAGS= -O3 -static -mabi=ilp32 -march=rv32im_zicsr -Wall -pedantic
+C_FLAGS+= -nostartfiles
+C_FLAGS+= -DNDEBUG # should remove assert checks
+C_FLAGS+= -finline-functions -fdata-sections -ffunction-sections
+C_FLAGS+= -T${LIB_DIR}/link.ld -L ${LIB_DIR} -lcv-verif
+C_FLAGS+= -I${RISCV}/riscv32-unknown-elf/include/
+C_FLAGS+= -I${REPO_DIR}/TOOLS/VPRO/ISS/common_lib/
+C_FLAGS+= -I${REPO_DIR}/TOOLS/VPRO/ISS/iss_lib/
+C_FLAGS+= -Wno-array-bounds -Wl,--no-warn-execstack -Wl,--no-warn-rwx-segments
+C_FLAGS+= -DBITWIDTH_REDUCE_TO_16_BIT=${BITWIDTH_REDUCE_TO_16_BIT}
+
+C_LDSCRIPT=${LIB_DIR}/link.ld
+
+COMPILE_TARGET_FROM_C=\
+	$$(RISCV_GCC) $(1) $$(C_FLAGS) $$(<) -o $$@ -Wl,--gc-sections; \
+	$$(RISCV_OBJDUMP) -D $$@ > $$@.objdump; \
+	$$(RISCV_READELF) -a $$@ > $$@.readelf; \
+	$$(RISCV_NM) $$@ > $$@.nm; \
+	$$(RISCV_OBJCOPY) -O binary -R .vproimage -R .nobss $$@ $$@.bin; \
+	$$(RISCV_OBJCOPY) -I binary -O binary --reverse-bytes=4 $$@.bin $$@.corrected.bin; \
+	xxd -g 4 -e $$@.bin | cut -d " " -f 2-5 > $$@.hex
+
+COMPILE_TARGET_FROM_CPP=\
+  @echo $$(RISCV_G++) $(1) $$(C_FLAGS) -std=c++2a -std=gnu++20 $$(<) -o $$@ -Wl,--gc-sections; \
+	$$(RISCV_G++) $(1) $$(C_FLAGS) -std=c++2a -std=gnu++20 $$(<) -o $$@ -Wl,--gc-sections; \
+	$$(RISCV_OBJDUMP) -D $$@ > $$@.objdump; \
+	$$(RISCV_READELF) -a $$@ > $$@.readelf; \
+	$$(RISCV_NM) $$@ > $$@.nm; \
+	$$(RISCV_OBJCOPY) -O binary -R .vproimage -R .nobss $$@ $$@.bin; \
+	$$(RISCV_OBJCOPY) -I binary -O binary --reverse-bytes=4 $$@.bin $$@.corrected.bin; \
+	xxd -g 4 -e $$@.bin | cut -d " " -f 2-5 > $$@.hex
+
+#
+# called from inside riscv_test_suite/Makefile.include:
+#    those source compile targets are added [Sven Gesper]
+#
+#$(work_dir_isa)/%.elf: $(src_dir)/%.cpp
+#	$(V) echo -e "Compile $$(@) [\e[96mfrom .cpp\e[39m]"
+#	@mkdir -p $$(@D)
+#	$(V) $(COMPILE_TARGET_FROM_CPP)
+#
+#$(work_dir_isa)/%.elf: $(src_dir)/%.c
+#	$(V) echo -e "Compile $$(@) [\e[96mfrom .c\e[39m]"
+#	@mkdir -p $$(@D)
+#	$(V) $(COMPILE_TARGET_FROM_C)
+
+
+
+
+#%.objdump: %.elf
+#	${RISCV}/bin/${PREFIX}-objdump -d -M no-aliases -M numeric -S $< > $@

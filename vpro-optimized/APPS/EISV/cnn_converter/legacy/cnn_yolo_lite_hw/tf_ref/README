@@ -1,0 +1,20 @@
+darknet_v1 (from MA Zhiyuan, Xingrui)
+
+tf_v2 (from Sven Gesper)
+
+    - load_model.py 
+        uses .weights file and creates a nn in TF2.2
+        requires pip3 to install 
+            - termcolor
+            - tensorflow 2.3
+            - opencv-python
+            - numpy
+        analyses weights & bias to match VPRO configuration 
+            16-bit in LM/MM
+            24-bit in RF
+        creates weights header and source files for VPRO compilation
+        visualizes float and fixpoint results in image format
+        
+    - vpro_postprocessing
+        loads from given dir binary vpro results
+        uses ../../data/image_in.png and overlays found boxes

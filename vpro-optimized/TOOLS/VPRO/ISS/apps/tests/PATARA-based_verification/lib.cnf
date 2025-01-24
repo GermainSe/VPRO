@@ -1,0 +1,10 @@
+IF(EXISTS "_lib.cnf")
+	include(_lib.cnf)
+ELSE()
+	set(VPRO_SIMULATOR_LIB_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../iss_lib")
+	set(VPRO_AUX_LIB_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../common_lib")
+ENDIF()
+
+
+#set(VPRO_SIMULATOR_LIB_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../TOOLS/VPRO/ISS/iss_lib")
+#set(VPRO_AUX_LIB_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../TOOLS/VPRO/ISS/common_lib")

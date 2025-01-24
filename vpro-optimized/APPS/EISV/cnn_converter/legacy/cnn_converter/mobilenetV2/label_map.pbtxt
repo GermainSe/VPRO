@@ -1,0 +1,36 @@
+item {
+   name: "thumbs-up"
+   id: 1
+   display_name: "Thumbs-up"
+}
+item { 
+   name: "thumbs-down"
+   id: 2
+   display_name: "Thumbs-down"
+}
+item { 
+   name: "stop"
+   id: 3
+   display_name: "Stop"
+}
+item { 
+   name: "one"
+   id: 4
+   display_name: "One"
+}
+item { 
+   name: "two"
+   id: 5
+   display_name: "Two"
+}
+item { 
+   name: "three"
+   id: 6
+   display_name: "Three"
+}
+item { 
+   name: "silence"
+   id: 7
+   display_name: "Silence"
+}
+

@@ -1,0 +1,58 @@
+# big image files
+*.iso
+
+*bin2img
+*img2bin
+*vmmf_read
+*vmmf_write
+
+# image files
+*.bmp
+*.bin
+*.ora
+*.log
+
+# c/c++ temp files
+*.preprocessed.sim.cpp
+*.o
+*.obj
+*.tmp
+*.out
+*.vpp
+*.bc
+*.elf
+
+build*/
+build/
+cmake*/
+.idea/
+archive/
+log/
+venv/
+
+#preprocessor user project files (qtcreator)
+*.user.*
+*.user
+*.usr
+
+*.tar.gz
+*.tar.gz.1
+*cmake
+
+*.png
+*.bmp
+_release/
+
+# CNN files
+*.pb
+*.weights
+
+rtl/testbenches/*
+!rtl/testbenches/*.vhd
+!rtl/testbenches/*.vhdl
+
+# sigasi project
+*.library_mapping.xml
+*.project
+.settings/
+*.jou

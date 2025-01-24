@@ -1,0 +1,42 @@
+#
+# Check binary MM dump (single file) from Simulation with a reference
+# 	APP: YOLO-LITE (7 Layers)
+#
+
+
+- dump bram memory in simulation to ramdump.bin
+
+	//    *((volatile uint32_t *) (0x3fff0000)) = 0x11000000; // base
+	//    *((volatile uint32_t *) (0x3fff1000)) = 0x01000000; // size + trigger
+
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/VPRO_0/U0/eisV_top_inst/eisV_core_inst/rst_ni 0 0
+     run 200ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_EN 1 0 -cancel 20ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_ADDR 32'h00FFFC00 0 -cancel 20ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_DATA 32'h11000000 0 -cancel 20ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_STRB 4'hf 0 -cancel 20ns
+     run 1000ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_EN 1 0 -cancel 20ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_ADDR 32'h00FFFC40 0 -cancel 20ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_DATA 32'h01000000 0 -cancel 20ns
+     force -freeze sim:/tb/design_1_i/vpro_axi_subsys_i/block_ram_0/U0/ram_inst/USER_IF_WRITE_STRB 4'hf 0 -cancel 20ns
+     run 1000ns
+     
+
+- copy to script sim_dat/ folder + run ./sim_data_split.sh
+
+	# Folder of Data:
+	data_input_path=sim_data
+
+	# Sim Dump file:
+	input_dump=${data_input_path}/ramdump.bin
+
+- the created sim_dat/layer_<x>.bin.dump split to channels with: ./split_fpga_data_to_layer_channels.sh
+
+- will also verify by compare to reference
+	- path: reference_path=./fpga_data_correct
+
+
+
+
+- split some endianess: cat <input> | ./endian_flip.sh > <output>

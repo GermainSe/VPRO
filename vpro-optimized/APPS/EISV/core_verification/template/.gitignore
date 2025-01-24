@@ -1,0 +1,8 @@
+*.a
+*.o
+*.bin
+*.obj*
+*.readelf
+*.elf
+*.hex
+*.32hex

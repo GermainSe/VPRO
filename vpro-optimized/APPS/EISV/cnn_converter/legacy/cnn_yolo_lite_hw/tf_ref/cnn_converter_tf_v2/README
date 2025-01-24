@@ -1,0 +1,21 @@
+# this is a copy from dev in mobileNetV2 (cnn_mobilenet)
+
+	load_model.py
+		"TopLevel"
+		- settings in first rows...
+		loads pb and executes using complete net
+		creates log in tensorboard 
+			previous log cleaned
+		runs through all tensors (subnet, no pre and post-processing)
+			evaluates them (get intermediate results)
+			converts BN into weights+bias
+			gets index for residual input or shortcuts
+			calls c_header_write() for Relu, Bias & Add Tensors 
+				as they include a conv,... to run on vpro in one "layer"
+	c_header_write performs 
+		- configuration in first rows...
+		fixp analysis and converts the weights+bias to fixp
+		[Obsolete] verify (verify_conv_bias_layer.py - float & verify_conv_bias_fixp.py - fixp) if configured
+		contains array for layer dependent input connection (global variable)
+		write out of tf results
+

@@ -1,0 +1,147 @@
+stages:
+  - test
+  - deploy
+
+
+# TODO
+#r_test-simple:
+#  stage: test
+#  image: ubuntu:20.04
+  #variables:
+    #TZ: Europe/Berlin
+#  script:
+#    - apt update
+#    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata
+#    - apt install cmake make gcc g++ qt5-default -y
+#    - cd apps/tests/simple_tests
+#    - make
+#    - make cicd_simple
+#    - echo "================================================ Builded ================================================"
+#    - cd build
+#    - ./sim --silent
+#  rules:
+#    - if: $CI_COMMIT_BRANCH != "release"
+
+r_test-common:
+  image: git.rz.tu-bs.de:4567/theoretische-informatik/ti/intern/04_tools/vpro/vpro_iss:latest
+  stage: test
+  script:
+    - git clone https://$core_verification_token@git.rz.tu-bs.de/theoretische-informatik/ti/intern/04_TOOLS/vpro/core_verification.git --depth=1
+    - cd core_verification/test_frameworks
+    - cd eisv-vpro-tests/references
+    - make
+    - cd ../..
+    - python3 run_iss_tests.py --sim-lib-dir /builds/theoretische-informatik/ti/intern/04_TOOLS/vpro/vpro_iss/iss_lib --aux-lib-dir /builds/theoretische-informatik/ti/intern/04_TOOLS/vpro/vpro_iss/common_lib
+  rules:
+    - if: $CI_COMMIT_BRANCH != "release"
+
+
+
+r_test-cnn_1:
+  image: git.rz.tu-bs.de:4567/theoretische-informatik/ti/intern/04_tools/vpro/vpro_iss:latest
+  stage: test
+  script:
+    - mkdir tools
+    - git clone https://git:$cli_token@git.rz.tu-bs.de/theoretische-informatik/ti/zuse-ki-avf/vpro-cli.git --depth=1 -b CI_CNN tools
+    - cd tools && source install.sh && cd ..
+    - git clone https://$cnn_converter_token@git.rz.tu-bs.de/theoretische-informatik/ti/intern/04_TOOLS/vpro/cnn_converter.git --depth=1
+    - export vpro_sim_lib_dir=$(pwd)/iss_lib
+    - export vpro_aux_lib_dir=$(pwd)/common_lib
+    - cd cnn_converter && source get_vpro_cnn_version.sh
+    - rm -rf netgen/build
+    - sed -i  's/list(FILTER NetgenSources EXCLUDE REGEX.*//g' netgen/CMakeLists.txt
+    - make sim_yololite CLUSTERS=1 UNITS=1
+   ##Verification
+    - cd nets/yololite/sim_results
+    - get_ref.sh cnn_converter cnn_converter $sys_current_year
+    - verify.sh cnn_converter* || exit $?;
+  rules:
+    - if: $CI_COMMIT_BRANCH != "release"
+  allow_failure:
+    exit_codes: 255
+
+r_test-cnn_2:
+  image: git.rz.tu-bs.de:4567/theoretische-informatik/ti/intern/04_tools/vpro/vpro_iss:latest
+  stage: test
+  script:
+    - mkdir tools
+    - git clone https://git:$cli_token@git.rz.tu-bs.de/theoretische-informatik/ti/zuse-ki-avf/vpro-cli.git --depth=1 -b CI_CNN tools
+    - cd tools && source install.sh && cd ..
+    - git clone https://$cnn_converter_token@git.rz.tu-bs.de/theoretische-informatik/ti/intern/04_TOOLS/vpro/cnn_converter.git --depth=1
+    - export vpro_sim_lib_dir=$(pwd)/iss_lib
+    - export vpro_aux_lib_dir=$(pwd)/common_lib
+    - cd cnn_converter && source get_vpro_cnn_version.sh
+    - rm -rf netgen/build
+    - sed -i  's/list(FILTER NetgenSources EXCLUDE REGEX.*//g' netgen/CMakeLists.txt
+    - make sim_yololite CLUSTERS=4 UNITS=8
+   ##Verification
+    - cd nets/yololite/sim_results
+    - get_ref.sh cnn_converter cnn_converter $sys_current_year
+    - verify.sh cnn_converter* || exit $?;
+  rules:
+    - if: $CI_COMMIT_BRANCH != "release"
+  allow_failure:
+    exit_codes: 255
+
+#r_test-nn_quant:
+#  image: git.rz.tu-bs.de:4567/theoretische-informatik/ti/intern/04_tools/vpro/vpro_iss:latest
+#  stage: test
+#  script:
+#    - cd .. && mv iss /iss && cd /iss
+#    - export vpro_sim_lib_dir=$(pwd)/iss_lib && export vpro_aux_lib_dir=$(pwd)/common_lib
+#    - export iss_dir=$(pwd)
+#    - cd /
+#    - git clone https://$cnn_converter_token@git.rz.tu-bs.de/theoretische-informatik/ti/intern/04_TOOLS/vpro/cnn_converter.git --depth=1
+#    - mkdir /nnq && cd /nnq
+#    - git clone https://$nn_quant_token@git.rz.tu-bs.de/theoretische-informatik/ti/intern/04_TOOLS/vpro/nn_quantization.git --depth=1 .
+#    - . /nn_quant_poetry_init/init_env/bin/activate
+#    - poetry install
+#    #- sed -i  's/test_conv2d_transpose_random(\*\*kwargs)//g' qutk/tests/layer_tests.py
+#    #- sed -i  's/def test_regression(num_random_tests = 100):/def test_regression(num_random_tests = 10):/g' qutk/tests/layer_tests.py
+#    - python3 qutk/tests/layer_tests.py -t sim
+#  rules:
+#    - if: $CI_COMMIT_BRANCH != "release"
+
+pages:
+  image: alpine:latest
+  stage: deploy
+  script:
+    - apk add --no-cache msttcorefonts-installer fontconfig font-noto font-noto-adlam font-noto-adlamunjoined font-noto-arabic font-noto-armenian font-noto-avestan font-noto-bamum font-noto-bengali font-noto-buhid font-noto-carian font-noto-chakma font-noto-cherokee font-noto-cypriot font-noto-deseret font-noto-devanagari font-noto-ethiopic font-noto-extra font-noto-georgian font-noto-glagolitic font-noto-gothic font-noto-gujarati font-noto-gurmukhi font-noto-hebrew font-noto-kannada font-noto-kayahli font-noto-khmer font-noto-lao font-noto-lisu font-noto-malayalam font-noto-mandaic font-noto-myanmar font-noto-nko font-noto-olchiki font-noto-oldturkic font-noto-oriya font-noto-osage font-noto-osmanya font-noto-shavian font-noto-sinhala font-noto-tamil font-noto-telugu font-noto-thaana font-noto-thai font-noto-tibetan font-noto-tifinagh font-noto-vai terminus-font ttf-opensans font-bakoma font-misc-misc font-croscore
+    - fc-cache -f && rm -rf /var/cache/*
+    - rm -Rf public
+    - mkdir public
+    - apk update
+    - apk add doxygen graphviz make
+    - cd src/doc && make doc
+    - cd ../../
+    - cp -R src/doc/html/* public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == "feature-pages-doc"
+
+deployment:
+  variables:
+    DE: $deploy
+  image: alpine:latest
+  stage: deploy
+  script:
+    - apk add git
+    - git config user.name "GitLab CI" && git config user.email "a.koehne@tu-bs.de"
+    - lm=`git log -1 --pretty=%B`
+    - rm -f .gitlab-ci.yml
+    - rm -Rf .git
+    - cd ..
+    - rm -Rf iss_eddv
+    - git clone $DE iss_eddv
+    - cd iss_eddv
+    - git checkout release
+    - rm -Rf *
+    - mv ../iss/* .
+    - git add .
+    - git config user.name "GitLab CI" && git config user.email "a.koehne@tu-bs.de"
+    - git commit -m "${lm}"
+    - git push
+  rules:
+    - if: $CI_COMMIT_BRANCH == "release"

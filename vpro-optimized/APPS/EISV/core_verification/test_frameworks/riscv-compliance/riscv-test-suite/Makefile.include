@@ -1,0 +1,69 @@
+#=======================================================================
+# Makefile for riscv-tests/isa
+#-----------------------------------------------------------------------
+
+act_dir := .
+src_dir := $(act_dir)/src
+work_dir := $(WORK)
+work_dir_isa := $(work_dir)/rv$(XLEN)i_m/$(RISCV_DEVICE)
+
+include $(act_dir)/Makefrag
+ifneq ($(RISCV_TEST),)
+	target_tests = $(RISCV_TEST).elf
+endif
+
+default: all
+
+#--------------------------------------------------------------------
+# Build rules
+#--------------------------------------------------------------------
+
+vpath %.S $(act_dir)
+
+INCLUDE=$(TARGETDIR)/$(RISCV_TARGET)/device/rv$(XLEN)i_m/$(RISCV_DEVICE)/Makefile.include
+ifeq ($(wildcard $(INCLUDE)),)
+    $(error Cannot find '$(INCLUDE)`. Check that RISCV_TARGET and RISCV_DEVICE are set correctly.)
+endif
+-include $(INCLUDE)
+
+#------------------------------------------------------------
+# Build and run assembly tests
+
+%.log: %.elf
+	$(V) echo "Execute $(@)"
+	$(V) $(RUN_TARGET)
+
+
+define compile_template
+
+$(work_dir_isa)/%.elf: $(src_dir)/%.S
+	$(V) echo "Compile $$(@) [\e[96mfrom .S\e[39m]"
+	@mkdir -p $$(@D)
+	$(V) $(COMPILE_TARGET)
+
+$(work_dir_isa)/%.elf: $(src_dir)/%.cpp
+	$(V) echo -e "Compile $$(@) [\e[96mfrom .cpp\e[39m]"
+	@mkdir -p $$(@D)
+	$(V) $(COMPILE_TARGET_FROM_CPP)
+
+$(work_dir_isa)/%.elf: $(src_dir)/%.c
+	$(V) echo -e "Compile $$(@) [\e[96mfrom .c\e[39m]"
+	@mkdir -p $$(@D)
+	$(V) $(COMPILE_TARGET_FROM_C)
+
+
+.PRECIOUS: $(work_dir_isa)/%.elf
+
+endef
+
+target_elf = $(foreach e,$(target_tests),$(work_dir_isa)/$(e))
+target_log = $(patsubst %.elf,%.log,$(target_elf))
+
+compile: $(target_elf)
+run: $(target_log)
+
+#------------------------------------------------------------
+# Clean up
+
+clean:
+	rm -rf $(work_dir)

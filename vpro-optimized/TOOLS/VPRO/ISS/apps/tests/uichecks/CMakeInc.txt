@@ -1,0 +1,77 @@
+cmake_minimum_required(VERSION 3.14)
+cmake_policy(SET CMP0074 NEW)
+SET(CMAKE_BUILD_TYPE RELEASE)
+
+# Define Modi as Standalone
+add_compile_definitions(ISS_STANDALONE=1)
+
+
+
+
+if(EXISTS "${PROJECT_SOURCE_DIR}/lib.cnf")
+    include(lib.cnf)
+    message(STATUS "[lib.cnf] loaded")
+else()
+    set(FAILED_VAR_LIB 0)
+    IF(DEFINED ENV{vpro_sim_lib_dir})
+        set(VPRO_SIMULATOR_LIB_dir "$ENV{vpro_sim_lib_dir}")
+        message(STATUS "using VPRO_SIM_LIB_DIR ${VPRO_SIMULATOR_LIB_dir}")
+    ELSE()
+        message(SEND_ERROR "VPRO_SIM_LIB_DIR wasn't found! Set ENV vpro_sim_lib_dir")
+        set(FAILED_VAR_LIB 1)
+    ENDIF()
+
+    IF(DEFINED ENV{vpro_aux_lib_dir})
+        set(VPRO_AUX_LIB_dir "$ENV{vpro_aux_lib_dir}")
+        message(STATUS "using VPRO_AUX_LIB_DIR ${VPRO_AUX_LIB_dir}")
+    ELSE()
+        message(SEND_ERROR "VPRO_AUX_LIB_DIR wasn't found! Set ENV vpro_aux_lib_dir")
+        set(FAILED_VAR_LIB 1)
+    ENDIF()
+
+    IF(${FAILED_VAR_LIB})
+        return()
+    ENDIF()
+ENDIF()
+# includes VPRO_SIMULATOR_LIB library
+
+add_subdirectory(${VPRO_SIMULATOR_LIB_dir} ${CMAKE_CURRENT_BINARY_DIR}/VPRO_SIMULATOR_LIB)
+add_subdirectory(${VPRO_AUX_LIB_dir} ${CMAKE_CURRENT_BINARY_DIR}/VPRO_AUX_LIB)
+
+
+
+
+
+
+#############################################################################################
+# Compiler FLAGS
+#############################################################################################
+macro(use_cxx11)
+    if (CMAKE_VERSION VERSION_LESS "3.1")
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+        endif ()
+    else ()
+        set(CMAKE_CXX_STANDARD 17)
+    endif ()
+endmacro(use_cxx11)
+use_cxx11()
+set(GFLAG -std=c++17)
+
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter")
+set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
+set(PlainIncludeDirs
+    ${CMAKE_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}
+    ${VPRO_SIMULATOR_LIB_dir}
+    ${VPRO_AUX_LIB_dir}
+)
+
+
+
+
+
+add_compile_options(-Wno-unused-function)
+

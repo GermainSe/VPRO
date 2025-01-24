@@ -1,0 +1,16 @@
+******************************************************************************************
+tf_verification.py (Yolo-lite Inference with TensorFlow, fixed point format; generate intermediate binary files results of each layers )
+$ Help: python3 tf_verification.py -h
+$ E.g.: python3 tf_verification.py -x 224 -y 224 -img ../data/test_img.png -wghts ../lib/yolo_files/yolo-lite.weights
+******************************************************************************************
+	converter_wghts.py (Yolo-lite weights converter, dynamic fixed point format conversion strategy)
+	$ Help: python3 converter_wghts.py -h
+ 	$ E.g.: python3 converter_wghts.py -x 224 -y 224 -img ../data/test_img.png -wghts ../lib/yolo_files/yolo-lite.weights
+	******************************************************************************************
+		net_yolo_lite.py (Yolo-lite network's struct and inference - float point)
+		weights_loader_yolo_lite_fpf.py (Loading float point weights from the original yolo_lite.wegihts)
+	******************************************************************************************
+	net_yolo_lite_fpf.py (Yolo-lite network's struct and inference - fixed point)
+	weights_loader_yolo_lite_fpf.py (Loading converted fixed point format weights)
+******************************************************************************************
+binary_detection.py (Visualization the dectection results using binary files of the last CNN layer of Yolo-lite)

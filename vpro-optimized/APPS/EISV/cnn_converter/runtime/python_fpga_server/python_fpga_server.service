@@ -1,0 +1,16 @@
+[Unit]
+Description=Python Server to Programm and Initialize the FPGA. Running as service on startup
+Wants=network.target
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+WorkingDirectory=/home/xilinx/python_fpga_server
+ExecStart=bash -c /home/xilinx/python_fpga_server/start_cnn_server.sh
+
+[Install]
+WantedBy=multi-user.target

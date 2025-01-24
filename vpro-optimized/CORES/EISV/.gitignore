@@ -1,0 +1,8 @@
+#.library_mapping.xml
+.project
+.settings/
+
+
+*vsim*/
+
+*.backup

@@ -1,0 +1,29 @@
+vpro_set_idmask(0xFFFFFFFF);
+
+    // set rf to certain value
+    rf_set(0, 0x100, 256);
+    vpro_wait_busy(0,0);
+    printf("RF 0 set to 16!\n");
+
+    __builtin_vpro_instruction_word(0, NONBLOCKING, NO_CHAIN, FUNC_BIT_REVERSAL, NO_FLAG_UPDATE,
+                                    DST_ADDR(0, 1, 16),
+                                    SRC1_ADDR(0, 1, 16),
+                                    SRC2_IMM(24),
+                                    15,
+                                    15);
+
+    vpro_wait_busy(0,0);
+    printf("Reversal 24 in RF 0 [0-255]. Result is 524288 = 0x080000!\n");
+
+    __builtin_vpro_instruction_word(0, NONBLOCKING, NO_CHAIN, FUNC_SUB, NO_FLAG_UPDATE,
+                                    DST_ADDR(0, 1, 16),
+                                    SRC1_ADDR(0, 1, 16),
+                                    SRC2_IMM(0x8000),
+                                    15,
+                                    15);
+    __builtin_vpro_instruction_word(0, NONBLOCKING, NO_CHAIN, FUNC_ADD, NO_FLAG_UPDATE,
+                                    DST_ADDR(0, 1, 16),
+                                    SRC1_ADDR(0, 1, 16),
+                                    SRC2_IMM(0x100),
+                                    15,
+                                    15);

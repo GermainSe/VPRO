@@ -1,0 +1,665 @@
+#include "inttypes.h"
+#include <algorithm>
+
+#include "segment_scheduling.h"
+#include "vpro_functions.h"
+#include <vpro.h>
+#include "eisv.h"
+#include "kernels.h"
+
+#if RV_VPRO_EXT == 1 and not defined(SIMULATION)
+#include <vpro/vpro_asm.h>
+#include <vpro/dma_asm.h>
+using namespace VPRO_RISC_EXT_VPRO;
+using namespace VPRO_RISC_EXT_DMA;
+#endif
+
+using namespace BIF;
+
+inline void print_cmd_segment(const COMMAND_SEGMENT &cmd, int cmd_idx) {
+  //    const auto *vpro_cmd = reinterpret_cast<const COMMAND_VPRO *>(seg.data);
+  //    const auto *dma_cmd = reinterpret_cast<const COMMAND_DMA::COMMAND_DMA *>(seg.data);
+    printf("[%i] @%p: ", cmd_idx, &cmd);
+    switch (cmd.type.type) {
+        case VPRO_CMD:
+           // FIXME
+            printf("VPRO, ");
+            if (cmd.vpro.command == conv_start)
+                printf("conv_start, ");
+            else if (cmd.vpro.command == conv_add)
+                printf("conv_add, ");
+            else if (cmd.vpro.command == relu_pool)
+                printf("relu_pool, ");
+            else if (cmd.vpro.command == shift_store)
+                printf("shift_store, ");
+            else if (cmd.vpro.command == residual)
+                printf("residual, ");
+            printf("lane: 0x%x, buffer: 0x%x, xend_1: %i, xend_2: %i, yend: %i, offset: %i\n",
+                   cmd.vpro.lane, cmd.vpro.buffer, cmd.vpro.xend_1, cmd.vpro.xend_2, cmd.vpro.yend,
+                   cmd.vpro.offset);
+            break;
+        case DMA_CMD:
+            printf("DMA, ");
+            if (cmd.dma.direction == e2l1D)
+                printf("e2l1D, ");
+            else if (cmd.dma.direction == e2l2D)
+                printf("e2l2D, ");
+            else if (cmd.dma.direction == l2e1D)
+                printf("l2e1D, ");
+            else if (cmd.dma.direction == l2e2D)
+                printf("l2e2D, ");
+            printf("cluster: 0x%x, unit_mask: 0x%" PRIx32 ", mm_addr: 0x%" PRIx32 ", lm_addr: 0x%" PRIx32 ", x_stride: %i, x_size: %i, y_size: %i\n",
+                   cmd.dma.cluster, cmd.dma.unit_mask, cmd.dma.mm_addr, cmd.dma.lm_addr, cmd.dma.x_stride,
+                   cmd.dma.x_size, cmd.dma.y_size);
+            break;
+        case VPRO_WAIT:
+            printf("SYNC VPRO\n");
+            break;
+        case DMA_WAIT:
+            printf("SYNC DMA\n");
+            break;
+        case BOTH_SYNC:
+            printf("SYNC Both\n");
+            break;
+        case DMA_BLOCK:
+            printf("DMA Block, size: %i\n", cmd.dma.unit_mask);
+            break;
+
+        default: ;
+    }
+}
+
+
+// progressbar
+void printProgress(int done, int goal, int width, int &last_progress, bool force_update = false) {
+#ifdef SIMULATION
+  int active_chars = round(1.0*done/goal*width);
+
+  if (active_chars != last_progress || force_update) {
+    last_progress = active_chars;
+    printf("\r Commands left: %6i / %i [", goal - done, goal);
+  
+    for (int i = 0; i < width; i++) {
+      printf(i < active_chars ? "#" : " ");
+    }
+    printf("] %5.1f%%", 100.0*done/goal);
+  }
+#endif
+}
+
+//#define RV_PRINT_SEGMENT_CNT
+//#define SEGMENT_SCHEDULING_VERBOSE
+
+void calcLayer(const LAYER &layer, const COMMAND_SEGMENT *segments, const uint32_t seg_size) {
+
+#ifdef SIMULATION
+    uint32_t startclock = aux_get_sys_time_lo();
+#else
+    VPRO_BUSY_MASK_CL = 0xffffffff;
+#endif
+
+    /**
+     * PERFORM PAD
+     */
+    if (layer.kernel_length > 1) { // PAD!
+        // configure the dma to pad loaded segments
+        dma_set_pad_widths(layer.pad.top, layer.pad.right, layer.pad.bottom, layer.pad.left);
+        dma_set_pad_value(layer.pad.value);
+    }
+
+    vector_length = (layer.seg_out_w) * (layer.seg_out_h);
+    if (vector_length < 5)
+        vector_length_compensate = 5 - vector_length;
+    else
+        vector_length_compensate = 0;
+
+    if (layer.type == LAYERTYPE::CONV2 || 
+        layer.type == LAYERTYPE::DEPTHWISE_CONV2 || 
+        layer.type == LAYERTYPE::CONV2_TRANSPOSE) {
+        RF_KERNEL_BASE = 1024 - (layer.kernel_length * layer.kernel_length);
+        RF_BIAS_BASE = RF_KERNEL_BASE - 1;
+        RF_RELU_6_BASE = RF_BIAS_BASE - 1;
+        kernel_x = layer.kernel_length;
+        kernel_y = layer.kernel_length;
+
+        //the result after MAC (convolution) is shifted right
+        // to be stored in RF with 24-bit
+        vpro_mac_h_bit_shift(layer.conv_result_shift_right);
+        if (layer.kernel_length == 1)
+            vpro_mul_h_bit_shift(layer.conv_result_shift_right);
+
+        if (layer.activation == LEAKY)
+            vpro_mul_h_bit_shift(18);
+
+        if (layer.type == LAYERTYPE::CONV2_TRANSPOSE && layer.stride > 1) {
+            vpro_set_mac_reset_mode(VPRO::MAC_RESET_MODE::Y_INCREMENT);
+        } else {
+            vpro_set_mac_reset_mode(VPRO::MAC_RESET_MODE::Z_INCREMENT);
+        }
+        vpro_set_mac_init_source(VPRO::MAC_INIT_SOURCE::ADDR);  // for adding bias and accumulating of out channel in RF
+
+        // not kernel 1 and leaky (different shift values)
+        assert(!((layer.kernel_length == 1) && (layer.activation == LEAKY)));
+    }
+    else if (layer.type == LAYERTYPE::RESIDUAL) {
+        RF_RELU_6_BASE = 1024 - 1;
+    }
+
+    if (layer.activation == RELU6) {
+        // store shifted value of "6" to RF
+        sim_printf("LAYER GONNA SHIFT 6 left by: %i \n", layer.relu_6_shift_left);
+        if (layer.relu_6_shift_left > 20) { // 6 takes 3 bit. if 24 are taken, result gets negative!
+            printf_warning("Relu 6 overflow...");
+        }
+        _relu6_load(layer.relu_6_shift_left);
+    }
+
+#if RV_VPRO_EXT == 1 and not defined(SIMULATION)
+    create_conv_template_functions(layer);
+#endif
+
+#ifdef IS_SIMULATION
+    printf_info("Total Segments: %i (%i [%3.2f %%, +%3.2f %%] with sense due to HW Configuration Overhead)\n",
+                seg_size,
+                seg_size, 100. * (float(seg_size) / float(seg_size)),
+                100. * (float(seg_size - seg_size) / float(seg_size)));
+    int last_progress = -1;
+
+#endif
+
+    // RF Layout
+    // KERNEL
+    //    1024 (end) - 9 (3x3 kernel) => 1014-1023
+    // BIAS
+    //    1024 (end) - 9 (3x3 kernel) -1 => 1013
+    // RELU6_value
+    //    1012
+    // DATA (CONV Out)
+    //    0 - 1011
+
+    // LM Layout
+    // KERNEL
+    //    (buffer_calc * 4096) + 4096 - (kernel_x * kernel_y * (lane+1));
+    //      A: L0: 8192 - 1*9 (3x3 kernel) = 8183-8191
+    //      A: L1: 8192 - 2*9 (3x3 kernel) = 8174-8182
+    //      B: L0: 4096 - 1*9 (3x3 kernel) = 4087-4095
+    //      B: L1: 4096 - 2*9 (3x3 kernel) = 4079-4086
+    // BIAS
+    //    (buffer_calc * 4096) + 4096 - (kernel_x * kernel_y * 2)- 1 - lane;
+    //      A: L0: 8192 - 2*9 (3x3 kernel) - 1     = 8173
+    //      A: L1: 8192 - 2*9 (3x3 kernel) - 1 - 1 = 8172
+    //      B: L0: 4096 - 2*9 (3x3 kernel) - 1     = 4078
+    //      B: L1: 4096 - 2*9 (3x3 kernel) - 1 - 1 = 4077
+    // DATA
+    //      IN: ?
+    //      OUT: ?
+
+    /**
+     * EXECUTE SEGMENTs         <-- main Loop -->
+     *
+     * Fetches Segment for current layer (big loop)
+     * Depending on command type, executes DMA or VPRO instructions
+     *
+     * DMA:
+     *  dma offset is added (depending on dynamic weights array adresses in mips/vpro system)
+     *  -> precalculated in configuration_generation app. only needed for SIM (conv pointer passed)
+     *
+     * VPRO:
+     *  all functions are declared inline
+     */
+
+#ifdef RV_PRINT_SEGMENT_CNT
+    int lst = 0;
+    int dmas = 0;
+    int vpros = 0;
+    int dma_syncs = 0;
+    int vpro_syncs = 0;
+#endif
+
+    intptr_t start_segment = intptr_t(&segments[0]);
+    intptr_t end_segment = intptr_t(&segments[0]) + seg_size * sizeof(COMMAND_SEGMENT);
+
+#ifndef SIMULATION
+    // declaration of a uint32_t variabale here will force gcc application for risc-v only to load the dcache short address once!?
+    uint32_t *dcache_short_hw = (uint32_t *)(IDMA_COMMAND_DCACHE_ADDR);
+#endif
+
+
+    auto print_seg = [layer](int index) {
+        if (layer.number != 3) return false;
+
+        if (index > 214 && index < 5569){
+            if ((index - 214)%85 == 0){ // c add
+//            case 4804:  // c add
+//            case 5569:  // c add
+                return true;
+            }
+        }
+
+        switch(index){
+            case 214:   // c start
+            case 5570:  // pool relu
+            case 5571:  // store
+                return true;
+            default:
+                return false;
+        }
+    };
+
+    auto before_action = [core_, layer](COMMAND_SEGMENT * CMD, int index) {
+        if (index == 214){
+            debug |= DEBUG_USER_DUMP;   // to enable register file dump
+            debug |= DEBUG_PIPELINE;
+            debug |= DEBUG_INSTRUCTION_DATA;
+        }
+        vpro_sync();
+        printf("\n\n================================================\n");
+        printf("Before [%i]: ", index);
+        print_cmd_segment(*CMD, index);
+        core_->sim_dump_register_file(0,0,0);
+    };
+
+    auto after_action = [core_, layer](COMMAND_SEGMENT * CMD, int index) {
+        vpro_sync();
+        printf("After [%i]: \n", index);
+        core_->sim_dump_register_file(0,0,0);
+        printf("================================================\n\n");
+        if (index == 5571){
+            debug &= ~DEBUG_USER_DUMP;
+            debug &= ~DEBUG_PIPELINE;
+            debug &= ~DEBUG_INSTRUCTION_DATA;
+        }
+    };
+
+
+// #pragma GCC unroll 8
+    // FIXME why intptr_t instead of 
+    for (intptr_t seg_cnt = start_segment; seg_cnt < end_segment; seg_cnt += sizeof(COMMAND_SEGMENT)) {
+        // hint: seg_cnt is also incremented manually within loop
+#define CMD ((COMMAND_SEGMENT *)seg_cnt)
+
+        int cmd_idx = (seg_cnt - start_segment) / sizeof(COMMAND_SEGMENT);
+#ifdef SIMULATION
+        printProgress(cmd_idx, seg_size, 60, last_progress);
+#elif defined(RV_PRINT_SEGMENT_CNT)
+        //        uint32_t mask = 0xffffffff; // every segments
+        //        uint32_t mask = 0xffffff80; // every 128 segments
+        uint32_t mask = 0xfffffc00; // every 1024 segments
+        if (((seg_size - cmd_idx) & mask) != lst) {
+            printf("\r%7i",seg_size - cmd_idx);
+            lst = (seg_size - cmd_idx) & mask;
+        }
+#endif
+#ifdef SEGMENT_SCHEDULING_VERBOSE
+        print_cmd_segment(*CMD, cmd_idx);
+#endif
+
+
+
+
+        if (print_seg(cmd_idx)){
+            before_action(CMD, cmd_idx);
+        }
+
+
+
+
+        if (CMD->type.type == VPRO_CMD) {
+#if defined(RV_PRINT_SEGMENT_CNT)
+            vpros++;
+#endif
+            const COMMAND_VPRO &vpro = CMD->vpro;
+            if (vpro.command == VPRO_TYPE::conv_start) {
+#if RV_VPRO_EXT == 1 and not defined(SIMULATION)
+                _bias_load_right(layer, vpro.bias_load_buffer_l0, 0);
+                _bias_load_right(layer, vpro.bias_load_buffer_l1, 1);
+#else
+                if (layer.bias_shift_right > 0) {
+                    _bias_load_right(layer, vpro.bias_load_buffer_l0, 0);
+                    _bias_load_right(layer, vpro.bias_load_buffer_l1, 1);
+                } else {
+                    _bias_load_left(layer, vpro.bias_load_buffer_l0, 0);
+                    _bias_load_left(layer, vpro.bias_load_buffer_l1, 1);
+                }
+#endif
+                _kernel_load_right(vpro.kernel_load_buffer_l0, 0, 0);
+                _kernel_load_right(vpro.kernel_load_buffer_l1, 1, 0);
+                _conv(layer, vpro.buffer);
+            } else if (vpro.command == VPRO_TYPE::conv_add) {
+                _kernel_load_right(vpro.kernel_load_buffer_l0, 0, 0);
+                _kernel_load_right(vpro.kernel_load_buffer_l1, 1, 0);
+                _conv_add(layer, vpro.buffer);
+            } else if (vpro.command == VPRO_TYPE::conv_transpose_start) {
+                if (layer.bias_shift_right > 0) {
+                    _bias_load_right(layer, vpro.bias_load_buffer_l0, 0);
+                    _bias_load_right(layer, vpro.bias_load_buffer_l1, 1);
+                } else {
+                    _bias_load_left(layer, vpro.bias_load_buffer_l0, 0);
+                    _bias_load_left(layer, vpro.bias_load_buffer_l1, 1);
+                }
+                _kernel_load_right(vpro.kernel_load_buffer_l0, 0, 0);
+                _kernel_load_right(vpro.kernel_load_buffer_l1, 1, 0);
+                if (layer.stride > 1) {
+                    _conv_transpose_start_strided(layer, vpro.buffer);
+                } else {
+                    _conv_transpose_start(layer, vpro.buffer);
+                }
+            } else if (vpro.command == VPRO_TYPE::conv_transpose_add) {
+                _kernel_load_right(vpro.kernel_load_buffer_l0, 0, 0);
+                _kernel_load_right(vpro.kernel_load_buffer_l1, 1, 0);
+                if (layer.stride > 1) {
+                    _conv_transpose_add_strided(layer, vpro.buffer);
+                } else {
+                    _conv_transpose_add(layer, vpro.buffer);
+                }
+            } else if (vpro.command == VPRO_TYPE::residual) {
+                _residual(layer, vpro.buffer, vpro.xend_1, vpro.yend, vpro.offset);
+            } else if (vpro.command == VPRO_TYPE::shift_store) {
+                if (layer.pool_stride == 1) {
+                    _shift_store(layer, vpro.buffer, vpro.xend_1, vpro.yend, vpro.offset, vpro.lane);
+                } else {
+                    _shift_store_pool(layer, vpro.buffer, vpro.xend_1, vpro.yend, vpro.xend_2, vpro.offset,
+                                      vpro.lane);
+                }
+            } else if (vpro.command == VPRO_TYPE::relu_pool) {
+                if (layer.pool_stride == 1) {         // no pooling  // only layer informations are relevant!
+                    if (layer.activation == LEAKY) {
+                        // for leaky relu, the leak value is encoded with .18
+                        // the result has to bes shifted back by 18 bit
+                        // TODO: Make shure conv (if kernel_l == 1) is finished! before reset of mulh
+                        // done before:
+                        // vpro_mul_h_bit_shift(18);
+                        _relu_leaky(layer);
+                    } else if (layer.activation == RECT) {
+                        _relu_rect(layer);
+                    } else if (layer.activation == RELU6) {
+                        _relu_6(layer);
+                    } else if (layer.activation == SIGMOID) {
+
+                        if (true){  // TODO: not always use fast sigmoid approximation?
+                            auto &rf_frac_bits = vpro.bias_load_buffer_l0;
+                            switch (rf_frac_bits) {
+                                case 10:
+                                    _sigmoid_fast<10>(layer, vpro.buffer, (rf_frac_bits-layer.store_shift_right));
+                                    break;
+                                case 11:
+                                    _sigmoid_fast<11>(layer, vpro.buffer, (rf_frac_bits-layer.store_shift_right));
+                                    break;
+                                case 12:
+                                    _sigmoid_fast<12>(layer, vpro.buffer, (rf_frac_bits-layer.store_shift_right));
+                                    break;
+                                case 13:
+                                    _sigmoid_fast<13>(layer, vpro.buffer, (rf_frac_bits-layer.store_shift_right));
+                                    break;
+                                case 14:
+                                    _sigmoid_fast<14>(layer, vpro.buffer, (rf_frac_bits-layer.store_shift_right));
+                                    break;
+                                    // maximum as mulh (x*x) only allows 18-bit for opb
+                                case 15:
+                                case 16:
+                                case 17:
+                                case 18:
+                                case 19:
+                                case 20:
+                                case 21:
+                                case 22:
+                                case 23:
+                                    VPRO::DIM2::PROCESSING::shift_ar(L0_1,
+                                                                     DST_ADDR(0, 1, layer.seg_out_w),
+                                                                     SRC1_ADDR(0, 1, layer.seg_out_w),
+                                                                     SRC2_IMM_2D(rf_frac_bits - 14),
+                                                                     (layer.seg_out_w) - 1,
+                                                                     (layer.seg_out_h) - 1);
+                                    _sigmoid_fast<14>(layer, vpro.buffer, (rf_frac_bits-layer.store_shift_right));
+                                    break;
+                                default:
+                                    printf_error("Sigmoid input needs to be in range .10 to .21 ( TODO: extend in segment_scheduling.cpp)!\n");
+                                    printf_error("Is: %i", rf_frac_bits);
+                            }
+                        } else {
+                           //  FIXME: shift to sigmoid's .11 input bit precision...
+                            auto &rf_frac_bits = vpro.bias_load_buffer_l0;
+                            VPRO::DIM3::PROCESSING::shift_ar(L0_1,
+                                                             DST_ADDR(0, 0, 0, 1),
+                                                             SRC1_ADDR(0, 0, 0, 1),
+                                                             SRC2_IMM_3D(rf_frac_bits - 11),
+                                                             0, 0, layer.seg_out_w * layer.seg_out_h - 1);
+                            // rf fractional bits is 11!
+                            _sigmoid_medium(layer, vpro.buffer, 11, (rf_frac_bits-layer.store_shift_right));
+                        }
+                    }
+                    if (vector_length_compensate > 0) {
+                        // lenght of this result to be relue'd  // sync cause read data is still processed by conv/store or relu
+                        VPRO::DIM2::PROCESSING::add(L0_1,
+                                                    DST_ADDR(962, 1, 0),
+                                                    SRC1_ADDR(962, 1, 0),
+                                                    SRC2_IMM_2D(0),
+                                                    vector_length_compensate, 0);
+                    }
+                } else {                             // with pooling // precalc layer informations:
+                    // with pool, but direct addressable, one command
+                    // TODO: pooling is always MAX pooling -> configurable
+                    _pool(layer, vpro.xend_1, vpro.xend_2, vpro.yend, 0);
+                    if (layer.activation == LEAKY) {
+                        // for leaky relu, the leak value is encoded with .18 (0.1)
+                        // the result has to bes shifted back by 18 bit
+                        // TODO: mulh_bit_shift differs between conv (kernel == 1) and leaky_relu.
+                        //      Make shure conv is finished! before set of mulh_bit_shift for relu
+                        //      to be done before: vpro_mul_h_bit_shift(18);
+                        _relu_leaky_pool(layer, vpro.xend_2, vpro.xend_2, 0);
+                    } else if (layer.activation == RECT) {
+                        _relu_rect_pool(layer, vpro.xend_2, vpro.xend_2, 0);
+                    } else if (layer.activation == RELU6) {
+                        _relu_6_pool(layer, vpro.xend_2, vpro.xend_2, 0);
+                    } else if (layer.activation == SIGMOID) {
+
+                        if (true) {  // TODO: not always use fast sigmoid approximation?
+                            auto &rf_frac_bits = vpro.bias_load_buffer_l0;
+                            switch (rf_frac_bits) {
+                                case 10:
+                                    _sigmoid_fast<10>(layer, vpro.buffer, (rf_frac_bits - layer.store_shift_right),
+                                                      true);
+                                    break;
+                                case 11:
+                                    _sigmoid_fast<11>(layer, vpro.buffer, (rf_frac_bits - layer.store_shift_right),
+                                                      true);
+                                    break;
+                                case 12:
+                                    _sigmoid_fast<12>(layer, vpro.buffer, (rf_frac_bits - layer.store_shift_right),
+                                                      true);
+                                    break;
+                                case 13:
+                                    _sigmoid_fast<13>(layer, vpro.buffer, (rf_frac_bits - layer.store_shift_right),
+                                                      true);
+                                    break;
+                                case 14:
+                                    _sigmoid_fast<14>(layer, vpro.buffer, (rf_frac_bits - layer.store_shift_right),
+                                                      true);
+                                    break;
+                                    // maximum as mulh (x*x) only allows 18-bit for opb
+                                case 15:
+                                case 16:
+                                case 17:
+                                case 18:
+                                case 19:
+                                case 20:
+                                case 21:
+                                case 22:
+                                case 23:
+                                    VPRO::DIM2::PROCESSING::shift_ar(L0_1,
+                                                                     DST_ADDR(0, 1, layer.seg_out_w),
+                                                                     SRC1_ADDR(0, 1, layer.seg_out_w),
+                                                                     SRC2_IMM_2D(rf_frac_bits - 14),
+                                                                     (layer.seg_out_w) - 1,
+                                                                     (layer.seg_out_h) - 1);
+                                    _sigmoid_fast<14>(layer, vpro.buffer, (rf_frac_bits - layer.store_shift_right),
+                                                      true);
+                                    break;
+                                default:
+                                    printf_error(
+                                            "Sigmoid input needs to be in range .10 to .21 ( TODO: extend in segment_scheduling.cpp)!\n");
+                                    printf_error("Is: %i", rf_frac_bits);
+                            }
+                        } else {
+                            // FIXME: shift to sigmoid's .11 input bit precision...
+                            auto &rf_frac_bits = vpro.bias_load_buffer_l0;
+                            // move to unpooled version and call regular sigmoid
+                            VPRO::DIM2::PROCESSING::shift_ar(L0_1,
+                                                         DST_ADDR(0, 1, layer.seg_out_w),
+                                                         SRC1_ADDR(0, 2, 2 * layer.seg_out_w),
+                                                         SRC2_IMM_2D(rf_frac_bits - 11),
+                                                         ((layer.seg_out_w) / 2) - 1,
+                                                         ((layer.seg_out_h) / 2) - 1 );
+                            // rf fractional bits is 11!
+                            _sigmoid_medium(layer, vpro.buffer, 11, (rf_frac_bits-layer.store_shift_right), true);
+                        }
+                    }
+                    if (vector_length_compensate > 0) {
+                        // lenght of this result to be relue'd  // sync cause read data is still processed by conv/store or relu
+                        VPRO::DIM2::PROCESSING::add(L0_1,
+                                                    DST_ADDR(962, 1, 0),
+                                                    SRC1_ADDR(962, 1, 0),
+                                                    SRC2_IMM_2D(0),
+                                                    vector_length_compensate, 0);
+                    }
+                }
+            }
+        } else if (CMD->type.type == DMA_BLOCK) {
+            const COMMAND_DMA &dmab = CMD->dma;
+            uint block_size = dmab.unit_mask;
+//            printf_warning("DMA BLOCK Segment! [size; %i]\n", block_size); // , start: %li, seg_cnt);
+
+#ifdef SIMULATION
+            for (unsigned int i = 0; i < block_size; i++) {
+                seg_cnt += sizeof(COMMAND_SEGMENT);
+                assert(CMD->type.type == DMA_CMD);
+                const COMMAND_DMA &dma = CMD->dma;
+//                print_cmd_segment(*CMD);
+                if (dma.direction == e2l1D ||
+                    dma.direction == e2l2D) {
+                    if (dma.isKernelOffset || dma.isBiasOffset) {
+                      dma_dcache_short_command((void*)CMD, 0, true); // external object (seg.data.mm_addr is offset in this addr)
+                    } else {
+                        dma_dcache_short_command((void*)CMD, 0, true);
+                    }
+                } else {
+                    dma_dcache_short_command((void*)CMD, 0, true);
+                }
+            }
+//            printf_warning("DMA BLOCK Segment trigger finished! [size; %i, end: %li]\n", block_size, seg_cnt);
+#else
+            dma_block_size(block_size);
+            dma_block_addr_trigger((void *)(seg_cnt + sizeof(COMMAND_SEGMENT)));
+            seg_cnt += block_size * sizeof(COMMAND_SEGMENT);
+#endif
+        } else if (CMD->type.type == BOTH_SYNC) {
+#ifndef SIMULATION
+            // load dcache line for segments to avoid dcache stall in next loop iterations
+                    {
+                        auto dcache_line_size_bytes = 4096; // 1024 Bytes in 64 x 128-bit words
+                        [[maybe_unused]] volatile auto tmp = *(reinterpret_cast<const uint8_t *>(seg_cnt) + dcache_line_size_bytes);
+                    }
+#endif
+            vpro_sync();
+        } else if (CMD->type.type == DMA_WAIT) {
+//            printf("[SYNC DMA]\n");
+#if defined(RV_PRINT_SEGMENT_CNT)
+            dma_syncs++;
+#endif
+#ifndef SIMULATION
+            // load dcache line for segments to avoid dcache stall in next loop iterations
+                    {
+                        auto dcache_line_size_bytes = 4096; // 1024 Bytes in 64 x 128-bit words
+                        [[maybe_unused]] volatile auto tmp = *(reinterpret_cast<const uint8_t *>(seg_cnt) + dcache_line_size_bytes);
+                    }
+#endif
+            vpro_dma_sync();
+//            dma_wait_to_finish(0xffffffff);
+        } else if (CMD->type.type == VPRO_WAIT) {
+//            printf("[SYNC VPRO]\n");
+#if defined(RV_PRINT_SEGMENT_CNT)
+            vpro_syncs++;
+#endif
+#ifndef SIMULATION
+            // load dcache line for segments to avoid dcache stall in next loop iterations
+                    {
+                        auto dcache_line_size_bytes = 4096; // 1024 Bytes in 64 x 128-bit words
+                        [[maybe_unused]] volatile auto tmp = *(reinterpret_cast<const uint8_t *>(seg_cnt) + dcache_line_size_bytes);
+                    }
+#endif
+            vpro_lane_sync();
+//            vpro_wait_busy(0xffffffff, 0xffffffff);
+        } else if (CMD->type.type == DMA_CMD) {
+//            printf("[DMA]\n");
+#if defined(RV_PRINT_SEGMENT_CNT)
+            dmas++;
+#endif
+//            const COMMAND_DMA::COMMAND_DMA &dma = *reinterpret_cast<const COMMAND_DMA::COMMAND_DMA *>(seg.data);
+//            if (dma.direction == COMMAND_DMA::DMA_DIRECTION::e2l1D) {
+//                printf("[DMA] pad_0: %s, pad_1: %s, pad_2: %s, pad_3: %s\n", (dma.pad_0?"true":"false"),
+//                       (dma.pad_1?"true":"false"), (dma.pad_2?"true":"false"), (dma.pad_3?"true":"false"));
+//            }
+
+            // shortcut issue via dcache parallel read
+#ifdef SIMULATION
+            const COMMAND_DMA &dma = CMD->dma;
+            if (dma.direction == e2l1D ||
+                dma.direction == e2l2D) {
+                if (dma.isKernelOffset || dma.isBiasOffset) {
+                  dma_dcache_short_command((void*)seg_cnt, 0); // external object (seg.data.mm_addr is offset in this addr)
+                } else {
+                    dma_dcache_short_command((void*)seg_cnt);
+                }
+            } else {
+                dma_dcache_short_command((void*)seg_cnt);
+            }
+#else
+            *dcache_short_hw = uint32_t(intptr_t(seg_cnt));
+//                dma_dcache_short_command((void*)CMD);
+#endif
+//            const COMMAND_DMA::COMMAND_DMA &dma = *reinterpret_cast<const COMMAND_DMA::COMMAND_DMA *>(seg.data);
+//            if (dma.direction == COMMAND_DMA::DMA_DIRECTION::e2l1D) {
+//                dma_ext1D_to_loc1D_broadcast(dma.cluster, dma.unit_mask, dma.mm_addr, dma.lm_addr, dma.x_size);
+//            } else if (dma.direction == COMMAND_DMA::DMA_DIRECTION::e2l2D) {
+//                bool pad[4] = {dma.pad_0, dma.pad_1, dma.pad_2, dma.pad_3};
+//                dma_ext2D_to_loc1D_broadcast(dma.cluster, dma.unit_mask, dma.mm_addr, dma.lm_addr, dma.x_stride,
+//                                             dma.x_size, dma.y_size, pad);
+//            } else if (dma.direction == COMMAND_DMA::DMA_DIRECTION::l2e1D) {
+//                dma_loc1D_to_ext1D(dma.cluster, dma.mm_addr, dma.lm_addr, dma.x_size);
+//            } else if (dma.direction == COMMAND_DMA::DMA_DIRECTION::l2e2D) {
+//                dma_loc1D_to_ext2D(dma.cluster, dma.mm_addr, dma.lm_addr, dma.x_stride, dma.x_size, dma.y_size);
+//            }
+        } else {
+            // not recognized segment type
+            // check segment address, generation (endianess), values, ...
+            aux_print_debugfifo(0xdead1009);
+            printf("\n[Error] Segment type unknown!\n");
+            printf("Segment.type 0x%8x\n", (unsigned int) CMD->type.type);
+            printf("Segment[%u] @ 0x%8x\n", (unsigned int) ((seg_cnt - start_segment) / sizeof(COMMAND_SEGMENT)),
+                   (unsigned int) uint32_t(seg_cnt));
+            exit(1);
+        } // case    / if
+
+
+
+
+        if (print_seg(cmd_idx)){
+            after_action(CMD, cmd_idx);
+        }
+
+    } // for all cmd segments
+
+
+#ifdef SIMULATION
+    printProgress(seg_size, seg_size, 60, last_progress, true);
+    printf("\n");
+    printf("[LAYER %i] took %i cycles\n", layer.number, aux_get_cycle_cnt() - startclock);
+    printf("[Clock] %i cycles\n", aux_get_cycle_cnt());
+#elif defined(RV_PRINT_SEGMENT_CNT)
+    printf("\r      0 Segments Remaining\n");
+    printf("\tDMA Segments: %i\n", dmas);
+    printf("\tVPRO Segments: %i\n", vpros);
+    printf("\tDMA Sync Segments: %i\n", dma_syncs);
+    printf("\tVPRO Sync Segments: %i\n", vpro_syncs);
+#endif
+}

@@ -1,0 +1,30 @@
+[submodule "SYS/axi"]
+	path = SYS/axi
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/10_system/system.git
+[submodule "TOOLS/VPRO/ISS"]
+	path = TOOLS/VPRO/ISS
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/04_TOOLS/vpro/vpro_iss.git
+[submodule "CORES/VPRO_Specialization"]
+	path = CORES/VPRO_Specialization
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/05_CORES/vpro_specialization.git
+[submodule "CORES/EISV_Specialization"]
+	path = CORES/EISV_Specialization
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/05_CORES/eis-v_specialization.git
+[submodule "CORES/VPRO"]
+	path = CORES/VPRO
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/05_CORES/VPRO.git
+[submodule "CORES/EISV"]
+	path = CORES/EISV
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/05_CORES/risc-v-core.git
+[submodule "ASIC/vpro-refflow-gf-22fdsoi_2_3"]
+	path = ASIC/vpro-refflow-gf-22fdsoi_2_3
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/06_CHIPS/asic-vpro-gf-22fdsoi-2.3.git
+[submodule "APPS/EISV/nn_quantization"]
+	path = APPS/EISV/nn_quantization
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/04_TOOLS/vpro/nn_quantization.git
+[submodule "APPS/EISV/core_verification"]
+	path = APPS/EISV/core_verification
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/04_TOOLS/vpro/core_verification.git
+[submodule "APPS/EISV/cnn_converter"]
+	path = APPS/EISV/cnn_converter
+	url = git@git.rz.tu-bs.de:theoretische-informatik/ti/intern/04_TOOLS/vpro/cnn_converter.git

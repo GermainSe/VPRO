@@ -1,0 +1,26 @@
+Main.cpp includes 
+    #include "includes/weights [16 / 64].h"
+        depending on weights Lib data precision (Check CmakeListsAdd.txt for which cpp/data Array is used)
+        used by C-Code reference
+
+    the calculation of the CNN with C-Code using the weights.h file from the Converter/preprocessor
+        optional floating point precision (no cut to 24/16-bit)
+        optional bitlength (32/64-bit, only matters if floating point)
+        the result (last Layer) may be saved as binary (16-bit precision)|image (8-bit precision)
+        the result can be loaded (instead of recalculation) [ONLY 16-bit / fixed point precision]
+
+    the calculation of the CNN with Darknet using the .weights & .cfg files from YOLO
+        result shown with opencv as overlay of found BBoxes
+
+    the calculation of the CNN with VPRO functions using the simulator and weights.h from the Conv/preproc
+        the result (last Layer) may be saved as binary (16-bit precision)|image (8-bit precision) [ONLY if comparision is acitve]
+        the result can be loaded (instead of recalculation)
+        the result may be compared to binary result of C-Code implementation
+        the result may be processed to get BBox (+visualization) [ONLY manual/visual compare of TF results and this]
+
+    the comparision (automatic) of C-Code execution with VPRO execution
+        based on 16-bit (cut) values of result arrays
+        
+includes/defines.h
+    sets defines for execution of different functions (like Darknet Reference, ...)
+

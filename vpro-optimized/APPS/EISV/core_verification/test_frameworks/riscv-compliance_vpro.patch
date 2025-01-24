@@ -1,0 +1,126 @@
+diff --git a/Makefile b/Makefile
+index 8e81723..0c2895b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -21,6 +21,8 @@ RISCV_ISA_OPT = $(subst $(space),$(pipe),$(RISCV_ISA_ALL))
+ 
+ RISCV_ISA_ALL := $(filter-out Makefile.include,$(RISCV_ISA_ALL))
+ 
++BITWIDTH_REDUCE_TO_16_BIT ?= 0
++
+ ifeq ($(RISCV_DEVICE),)
+     RISCV_DEVICE = I
+     DEFAULT_TARGET=all_variant
+diff --git a/riscv-test-suite/Makefile.include b/riscv-test-suite/Makefile.include
+index 080aa1e..6f6f28f 100644
+--- a/riscv-test-suite/Makefile.include
++++ b/riscv-test-suite/Makefile.include
+@@ -37,10 +37,21 @@ endif
+ define compile_template
+ 
+ $(work_dir_isa)/%.elf: $(src_dir)/%.S
+-	$(V) echo "Compile $$(@)"
++	$(V) echo "Compile $$(@) [\e[96mfrom .S\e[39m]"
+ 	@mkdir -p $$(@D)
+ 	$(V) $(COMPILE_TARGET)
+ 
++$(work_dir_isa)/%.elf: $(src_dir)/%.cpp
++	$(V) echo -e "Compile $$(@) [\e[96mfrom .cpp\e[39m]"
++	@mkdir -p $$(@D)
++	$(V) $(COMPILE_TARGET_FROM_CPP)
++
++$(work_dir_isa)/%.elf: $(src_dir)/%.c
++	$(V) echo -e "Compile $$(@) [\e[96mfrom .c\e[39m]"
++	@mkdir -p $$(@D)
++	$(V) $(COMPILE_TARGET_FROM_C)
++
++
+ .PRECIOUS: $(work_dir_isa)/%.elf
+ 
+ endef
+diff --git a/riscv-test-suite/env/arch_test.h b/riscv-test-suite/env/arch_test.h
+index c5f532b..4fe3115 100644
+--- a/riscv-test-suite/env/arch_test.h
++++ b/riscv-test-suite/env/arch_test.h
+@@ -107,6 +107,14 @@
+   jalr ra, x1
+   rvtest_prolog_done:
+ #endif
++
++     /* Enable UART Tx Channel (set control reg) */
++     .equ    UART_CONTROL_ADDR, 0xffffffb8
++     li      x20,UART_CONTROL_ADDR	// UART_CONTROL_ADDR, 0xffffffb8
++     .equ    UART_CONTROL_TX_EN,0x28
++     li      x21,UART_CONTROL_TX_EN	// UART_CONTROL_TX_EN, 0x28
++     sw      x21, 0(x20)
++
+      LI (x1,  (0xFEEDBEADFEEDBEAD & MASK));
+      LI (x2,  (0xFF76DF56FF76DF56 & MASK));
+      LI (x3,  (0x7FBB6FAB7FBB6FAB & MASK));
+diff --git a/riscv-test-suite/rv32i_m/C/Makefile b/riscv-test-suite/rv32i_m/C/Makefile
+index d8449d8..a54f9d2 100644
+--- a/riscv-test-suite/rv32i_m/C/Makefile
++++ b/riscv-test-suite/rv32i_m/C/Makefile
+@@ -1,3 +1,3 @@
+ include ../../Makefile.include
+ 
+-$(eval $(call compile_template,-march=rv32ic -mabi=ilp32 -DXLEN=$(XLEN)))
++$(eval $(call compile_template,-march=rv32ic_zicsr -mabi=ilp32 -DXLEN=$(XLEN)))
+diff --git a/riscv-test-suite/rv32i_m/C/Makefrag b/riscv-test-suite/rv32i_m/C/Makefrag
+index b2474c1..1297fd9 100644
+--- a/riscv-test-suite/rv32i_m/C/Makefrag
++++ b/riscv-test-suite/rv32i_m/C/Makefrag
+@@ -53,8 +53,9 @@ rv32i_sc_tests = \
+   csub-01 \
+   csw-01 \
+   cswsp-01 \
+-  cxor-01 \
+-  cebreak-01
++  cxor-01
++
++#  cebreak-01
+ 
+ 
+ rv32i_tests = $(addsuffix .elf, $(rv32i_sc_tests))
+diff --git a/riscv-test-suite/rv32i_m/I/Makefile b/riscv-test-suite/rv32i_m/I/Makefile
+index 74d7881..17ac573 100644
+--- a/riscv-test-suite/rv32i_m/I/Makefile
++++ b/riscv-test-suite/rv32i_m/I/Makefile
+@@ -1,3 +1,3 @@
+ include ../../Makefile.include
+ 
+-$(eval $(call compile_template,-march=rv32i -mabi=ilp32 -DXLEN=$(XLEN)))
++$(eval $(call compile_template,-march=rv32i_zicsr -mabi=ilp32 -DXLEN=$(XLEN)))
+diff --git a/riscv-test-suite/rv32i_m/M/Makefile b/riscv-test-suite/rv32i_m/M/Makefile
+index 17df499..c96404a 100644
+--- a/riscv-test-suite/rv32i_m/M/Makefile
++++ b/riscv-test-suite/rv32i_m/M/Makefile
+@@ -1,3 +1,3 @@
+ include ../../Makefile.include
+ 
+-$(eval $(call compile_template,-march=rv32im -mabi=ilp32 -DXLEN=$(XLEN)))
++$(eval $(call compile_template,-march=rv32im_zicsr -mabi=ilp32 -DXLEN=$(XLEN)))
+diff --git a/riscv-test-suite/rv32i_m/Own b/riscv-test-suite/rv32i_m/Own
+new file mode 120000
+index 0000000..04ec436
+--- /dev/null
++++ b/riscv-test-suite/rv32i_m/Own
+@@ -0,0 +1 @@
++../../../eisv-custom-tests
+\ No newline at end of file
+diff --git a/riscv-test-suite/rv32i_m/Patara b/riscv-test-suite/rv32i_m/Patara
+new file mode 120000
+index 0000000..3b4cfb6
+--- /dev/null
++++ b/riscv-test-suite/rv32i_m/Patara
+@@ -0,0 +1 @@
++../../../eisv-patara-tests
+\ No newline at end of file
+diff --git a/riscv-test-suite/rv32i_m/VPRO b/riscv-test-suite/rv32i_m/VPRO
+new file mode 120000
+index 0000000..7f6e108
+--- /dev/null
++++ b/riscv-test-suite/rv32i_m/VPRO
+@@ -0,0 +1 @@
++../../../eisv-vpro-tests
+\ No newline at end of file
